@@ -1,5 +1,5 @@
-import marlonPhoto from "../assets/marlon-jimenez.jpg";
-import sebastianPhoto from "../assets/sebastian-ariza.jpg";
+import marlonPhoto from "../assets/marlon-jimenez.jpeg";
+import sebastianPhoto from "../assets/sebastian-ariza.jpeg";
 import { team } from "../data/site";
 
 const memberPhotos: Record<string, string> = {
