@@ -1,4 +1,11 @@
+import marlonPhoto from "../assets/marlon-jimenez.jpg";
+import sebastianPhoto from "../assets/sebastian-ariza.jpg";
 import { team } from "../data/site";
+
+const memberPhotos: Record<string, string> = {
+  "Marlon David Jiménez Padilla": marlonPhoto,
+  "Sebastián Elías Ariza Fontalvo": sebastianPhoto,
+};
 
 export function Team() {
   return (
@@ -14,21 +21,34 @@ export function Team() {
         </div>
 
         <div className="team fade-in-up">
-          {team.map((member) => (
-            <article className="person" key={member.name}>
-              <div
-                className="personimg"
-                aria-label={`Fotografía pendiente de ${member.name}`}
-              >
-                {member.initials}
-              </div>
-              <div>
-                <h3>{member.name}</h3>
-                <p className="role">{member.role}</p>
-                <p>{member.bio}</p>
-              </div>
-            </article>
-          ))}
+          {team.map((member) => {
+            const photo = memberPhotos[member.name];
+
+            return (
+              <article className="person" key={member.name}>
+                {photo ? (
+                  <img
+                    src={photo}
+                    alt={member.name}
+                    className="personimg"
+                  />
+                ) : (
+                  <div
+                    className="personimg"
+                    aria-label={`Fotografía pendiente de ${member.name}`}
+                  >
+                    {member.initials}
+                  </div>
+                )}
+
+                <div>
+                  <h3>{member.name}</h3>
+                  <p className="role">{member.role}</p>
+                  <p>{member.bio}</p>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </div>
     </section>
