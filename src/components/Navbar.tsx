@@ -1,5 +1,5 @@
 import { useState } from "react";
-import logo from "../assets/ja-legal-logo.svg";
+import logo from "../assets/LogoEmpresa.PNG";
 import { navigation } from "../data/site";
 
 export function Navbar() {
