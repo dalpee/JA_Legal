@@ -1,0 +1,21 @@
+<svg width="780" height="180" viewBox="0 0 780 180" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Jiménez &amp; Ariza Asociados</title>
+  <desc id="desc">Logo de firma jurídica con monograma J y A.</desc>
+  <g transform="translate(24 20)">
+    <rect x="0" y="0" width="140" height="140" rx="8" fill="#071A2E"/>
+    <rect x="8" y="8" width="124" height="124" rx="4" stroke="#D8B56B" stroke-width="4"/>
+    <path d="M44 37V84C44 103 34 111 18 111" stroke="#F0D596" stroke-width="10" stroke-linecap="square"/>
+    <path d="M80 111L108 37L136 111" stroke="#D8B56B" stroke-width="10" stroke-linecap="square" stroke-linejoin="miter"/>
+    <path d="M91 84H124" stroke="#D8B56B" stroke-width="8" stroke-linecap="square"/>
+    <path d="M60 107L78 87" stroke="#F0D596" stroke-width="5" stroke-linecap="square"/>
+  </g>
+  <g transform="translate(192 43)">
+    <text x="0" y="52" fill="#FFFFFF" font-family="Georgia, 'Times New Roman', serif" font-size="48" font-weight="700">
+      Jiménez &amp; Ariza
+    </text>
+    <text x="2" y="92" fill="#8A6A2E" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="6">
+      ASOCIADOS
+    </text>
+    <path d="M2 112H462" stroke="#D8B56B" stroke-width="3"/>
+  </g>
+</svg>
