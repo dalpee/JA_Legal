@@ -4,6 +4,7 @@ import { navigation } from "../data/site";
 
 export function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
+
   const closeMenu = () => setMenuOpen(false);
 
   return (
@@ -19,8 +20,17 @@ export function Navbar() {
               {item.label}
             </a>
           ))}
-          <a href="#contacto" className="btn primary navcta" onClick={closeMenu}>
+
+          <a
+            href="#contacto"
+            className="btn primary navcta"
+            onClick={closeMenu}
+          >
             Agendar consulta
+          </a>
+
+          <a href="/portal" className="btn primary navcta" onClick={closeMenu}>
+            Portal clientes
           </a>
         </nav>
 

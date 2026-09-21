@@ -1,24 +1,55 @@
-import { type FormEvent } from "react";
+import { type FormEvent, useState } from "react";
 import { firm, services } from "../data/site";
+import { supabase } from "../lib/supabaseClient";
 
 export function Contact() {
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setLoading(true);
+    setErrorMessage("");
 
     const form = new FormData(event.currentTarget);
+    const nombre = String(form.get("name") || "");
+    const correo = String(form.get("email") || "");
+    const telefono = String(form.get("phone") || "");
+    const area = String(form.get("area") || "");
+    const caso = String(form.get("message") || "");
+
+    const { error } = await supabase.from("contactos_web").insert({
+      nombre,
+      correo,
+      telefono,
+      area,
+      mensaje: caso,
+    });
+
+    setLoading(false);
+
+    if (error) {
+      console.error(error);
+      setErrorMessage("No pudimos enviar su consulta. Intente nuevamente.");
+      return;
+    }
+
     const message = [
       "Hola, quiero solicitar una asesoría jurídica.",
-      `Nombre: ${form.get("name") || ""}`,
-      `Correo: ${form.get("email") || ""}`,
-      `Teléfono: ${form.get("phone") || ""}`,
-      `Área: ${form.get("area") || ""}`,
-      `Caso: ${form.get("message") || ""}`,
+      `Nombre: ${nombre}`,
+      `Correo: ${correo}`,
+      `Teléfono: ${telefono}`,
+      `Área: ${area}`,
+      `Caso: ${caso}`,
     ].join("\n");
+    const whatsappNumber = firm.phoneHref.replace(/\D/g, "");
 
     window.open(
-      `https://wa.me/${firm.phoneHref}?text=${encodeURIComponent(message)}`,
+      `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`,
       "_blank",
     );
+
+    event.currentTarget.reset();
   };
 
   return (
@@ -91,9 +122,10 @@ export function Contact() {
                 placeholder="Describa su situación"
               />
             </label>
-            <button type="submit" className="btn primary">
-              Enviar por WhatsApp
+            <button type="submit" className="btn primary" disabled={loading}>
+              {loading ? "Enviando..." : "Enviar por WhatsApp"}
             </button>
+            {errorMessage && <p className="form-error">{errorMessage}</p>}
             <p className="note">
               Al enviar, se abrirá WhatsApp con la información diligenciada.
             </p>
