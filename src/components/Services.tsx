@@ -10,9 +10,9 @@ export function Services() {
             <h2>Áreas de práctica</h2>
             <p className="gold-text">Servicios jurídicos integrales</p>
           </div>
-          <p>
+          <p className="heading-sub">
             Soluciones preventivas, consultivas y litigiosas adaptadas a cada
-            cliente.
+            cliente con rigurosidad técnica.
           </p>
         </div>
 

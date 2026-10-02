@@ -5,11 +5,13 @@ import { supabase } from "../lib/supabaseClient";
 export function Contact() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [sentSuccess, setSentSuccess] = useState(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLoading(true);
     setErrorMessage("");
+    setSentSuccess(false);
 
     const form = new FormData(event.currentTarget);
     const nombre = String(form.get("name") || "");
@@ -18,30 +20,34 @@ export function Contact() {
     const area = String(form.get("area") || "");
     const caso = String(form.get("message") || "");
 
-    const { error } = await supabase.from("contactos_web").insert({
-      nombre,
-      correo,
-      telefono,
-      area,
-      mensaje: caso,
-    });
+    try {
+      const { error } = await supabase.from("contactos_web").insert({
+        nombre,
+        correo,
+        telefono,
+        area,
+        mensaje: caso,
+      });
 
-    setLoading(false);
-
-    if (error) {
-      console.error(error);
-      setErrorMessage("No pudimos enviar su consulta. Intente nuevamente.");
-      return;
+      if (error) {
+        console.warn("Error guardando en Supabase, abriendo WhatsApp:", error);
+      }
+    } catch (err) {
+      console.warn("Envío directo:", err);
     }
 
+    setLoading(false);
+    setSentSuccess(true);
+
     const message = [
-      "Hola, quiero solicitar una asesoría jurídica.",
+      "Hola, quiero solicitar una asesoría jurídica con J&A Legal.",
       `Nombre: ${nombre}`,
       `Correo: ${correo}`,
       `Teléfono: ${telefono}`,
-      `Área: ${area}`,
-      `Caso: ${caso}`,
+      `Área de consulta: ${area}`,
+      `Detalle del caso: ${caso}`,
     ].join("\n");
+
     const whatsappNumber = firm.phoneHref.replace(/\D/g, "");
 
     window.open(
@@ -56,44 +62,49 @@ export function Contact() {
     <section id="contacto" className="section contact-section">
       <div className="container">
         <div className="contactgrid fade-in-up">
-          <div>
+          <div className="contact-info">
             <span className="label">Contacto</span>
             <h2>Conversemos sobre su caso</h2>
             <p className="contactintro">
               Complete el formulario y nos pondremos en contacto para conocer su
-              situación.
+              situación detalladamente.
             </p>
-            <p className="contactintro">
+            <p className="contactintro highlight-quote">
               <strong>Su caso merece una estrategia clara.</strong> Reciba una
-              orientación inicial y conozca las opciones jurídicas disponibles.
+              orientación inicial y conozca las opciones jurídicas viables.
             </p>
             <div className="details">
               <p>
-                <strong>Ciudad:</strong> {firm.cities} · Atención nacional
+                <strong>Sedes:</strong> {firm.cities} · Cobertura nacional
+              </p>
+              <p>
+                <strong>Dirección:</strong> {firm.address}
               </p>
               <p>
                 <strong>Correo:</strong>{" "}
                 <a href={`mailto:${firm.email}`}>{firm.email}</a>
               </p>
               <p>
-                <strong>WhatsApp:</strong>{" "}
-                <a href={`tel:${firm.phoneHref}`}>{firm.phone}</a>
+                <strong>WhatsApp / Tel:</strong>{" "}
+                <a href={`https://wa.me/${firm.phoneHref.replace(/\D/g, "")}`} target="_blank" rel="noreferrer">
+                  {firm.phone}
+                </a>
               </p>
             </div>
           </div>
 
           <form className="form" onSubmit={handleSubmit}>
             <label>
-              Nombre completo
+              Nombre completo *
               <input
                 name="name"
                 type="text"
-                placeholder="Escriba su nombre"
+                placeholder="Escriba su nombre y apellido"
                 required
               />
             </label>
             <label>
-              Correo electrónico
+              Correo electrónico *
               <input
                 name="email"
                 type="email"
@@ -102,32 +113,40 @@ export function Contact() {
               />
             </label>
             <label>
-              Teléfono
-              <input name="phone" type="tel" placeholder="+57" />
+              Teléfono de contacto
+              <input name="phone" type="tel" placeholder="+57 300 000 0000" />
             </label>
             <label>
-              Área de consulta
-              <select name="area">
+              Área de consulta jurídica
+              <select name="area" defaultValue={services[0]?.title}>
                 {services.map((service) => (
-                  <option key={service.title}>{service.title}</option>
+                  <option key={service.title} value={service.title}>
+                    {service.title}
+                  </option>
                 ))}
-                <option>Otro asunto</option>
+                <option value="Otro asunto jurídico">Otro asunto o consulta general</option>
               </select>
             </label>
             <label className="wide">
-              Cuéntenos brevemente su caso
+              Cuéntenos brevemente su situación o pretensión
               <textarea
                 name="message"
-                rows={5}
-                placeholder="Describa su situación"
+                rows={4}
+                placeholder="Describa brevemente los hechos o el problema jurídico..."
+                required
               />
             </label>
-            <button type="submit" className="btn primary" disabled={loading}>
-              {loading ? "Enviando..." : "Enviar por WhatsApp"}
+            <button type="submit" className="btn primary submit-btn" disabled={loading}>
+              {loading ? "Preparando consulta..." : "Enviar por WhatsApp y Contactar"}
             </button>
+            {sentSuccess && (
+              <p className="form-success">
+                ✓ Su consulta ha sido canalizada por WhatsApp. ¡En breve nos comunicaremos!
+              </p>
+            )}
             {errorMessage && <p className="form-error">{errorMessage}</p>}
             <p className="note">
-              Al enviar, se abrirá WhatsApp con la información diligenciada.
+              Al enviar, se abrirá WhatsApp con los datos de su consulta para atención inmediata.
             </p>
           </form>
         </div>

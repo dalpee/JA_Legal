@@ -17,7 +17,7 @@ export function Team() {
             <h2>Nuestro equipo</h2>
             <p className="gold-text">Abogados comprometidos con cada caso</p>
           </div>
-          <p>Experiencia jurídica, visión estratégica y atención directa.</p>
+          <p className="heading-sub">Experiencia jurídica, visión estratégica y atención directa.</p>
         </div>
 
         <div className="team fade-in-up">
@@ -26,25 +26,36 @@ export function Team() {
 
             return (
               <article className="person" key={member.name}>
-                {photo ? (
-                  <img
-                    src={photo}
-                    alt={member.name}
-                    className="personimg"
-                  />
-                ) : (
+                <div className="person-avatar-wrap">
+                  {photo ? (
+                    <img
+                      src={photo}
+                      alt={member.name}
+                      className="personimg"
+                      onError={(e) => {
+                        // Fallback to stylized initials if image fails
+                        e.currentTarget.style.display = "none";
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          const fallback = parent.querySelector(".person-fallback");
+                          if (fallback) (fallback as HTMLElement).style.display = "flex";
+                        }
+                      }}
+                    />
+                  ) : null}
                   <div
-                    className="personimg"
-                    aria-label={`Fotografía pendiente de ${member.name}`}
+                    className="personimg person-fallback"
+                    style={{ display: photo ? "none" : "flex" }}
+                    aria-label={`Fotografía de ${member.name}`}
                   >
-                    {member.initials}
+                    <span>{member.initials}</span>
                   </div>
-                )}
+                </div>
 
-                <div>
+                <div className="person-info">
                   <h3>{member.name}</h3>
                   <p className="role">{member.role}</p>
-                  <p>{member.bio}</p>
+                  <p className="bio">{member.bio}</p>
                 </div>
               </article>
             );

@@ -3,9 +3,10 @@ export function Hero() {
     <section id="inicio" className="hero">
       <div className="container herogrid">
         <div className="hero-copy fade-in-up">
-          <span className="eyebrow">Firma jurídica en Colombia</span>
+          <span className="eyebrow">FIRMA JURÍDICA EN COLOMBIA</span>
           <h1>
-            Estrategia legal con <span>resultados reales</span>
+            Estrategia legal <br />
+            con <span>resultados reales</span>
           </h1>
           <p>
             Acompañamos personas, empresas y entidades con soluciones jurídicas
@@ -22,17 +23,19 @@ export function Hero() {
         </div>
 
         <aside className="herocard fade-in-up">
-          <span className="eyebrow">Consulta jurídica</span>
+          <span className="eyebrow">CONSULTA JURÍDICA</span>
           <h2>Cuéntenos su caso</h2>
           <p>
             Analizamos su situación y le explicamos las alternativas jurídicas
             disponibles.
           </p>
-          <p>
+          <p className="card-features">
             <strong>Atención:</strong> Personalizada · <strong>Enfoque:</strong>{" "}
             Estratégico · <strong>Cobertura:</strong> Nacional
           </p>
-          <a href="#contacto">Iniciar contacto</a>
+          <a href="#contacto" className="card-link">
+            Iniciar contacto →
+          </a>
         </aside>
       </div>
     </section>

@@ -1,17 +1,33 @@
 import { useState } from "react";
-import logo from "../assets/logoempresa.png";
+import logoSvg from "../assets/ja-legal-logo.svg";
 import { navigation } from "../data/site";
 
-export function Navbar() {
+interface NavbarProps {
+  onOpenPortal?: () => void;
+}
+
+export function Navbar({ onOpenPortal }: NavbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const closeMenu = () => setMenuOpen(false);
+
+  const handlePortalClick = (e: React.MouseEvent) => {
+    closeMenu();
+    if (onOpenPortal) {
+      e.preventDefault();
+      onOpenPortal();
+    }
+  };
 
   return (
     <header className="header">
       <div className="container navwrap">
         <a href="#inicio" onClick={closeMenu} className="brand">
-          <img src={logo} alt="Jiménez & Ariza Asociados" className="logo" />
+          <img
+            src={logoSvg}
+            alt="Jiménez & Ariza Asociados"
+            className="logo"
+          />
         </a>
 
         <nav className={`nav ${menuOpen ? "open" : ""}`} id="mainNav">
@@ -29,7 +45,11 @@ export function Navbar() {
             Agendar consulta
           </a>
 
-          <a href="/portal" className="btn primary navcta" onClick={closeMenu}>
+          <a
+            href="#portal"
+            className="btn primary navcta portal-btn"
+            onClick={handlePortalClick}
+          >
             Portal clientes
           </a>
         </nav>
@@ -42,7 +62,7 @@ export function Navbar() {
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((value) => !value)}
         >
-          ☰
+          {menuOpen ? "✕" : "☰"}
         </button>
       </div>
     </header>

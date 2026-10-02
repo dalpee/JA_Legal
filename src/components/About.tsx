@@ -11,7 +11,7 @@ export function About() {
         </div>
         <div className="copy">
           <p>
-            Jiménez & Ariza Asociados es una firma jurídica colombiana que brinda
+            Jiménez &amp; Ariza Asociados es una firma jurídica colombiana que brinda
             asesoría, representación y acompañamiento legal a personas naturales,
             empresas y entidades.
           </p>

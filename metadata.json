@@ -1,0 +1,6 @@
+{
+  "name": "J&A Legal - Portal del Cliente y Gestor de Casos",
+  "description": "Portal interactivo para seguimiento de procesos jurídicos, visualización de avances para clientes y simulador/modificador en vivo de casos para firmas legales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

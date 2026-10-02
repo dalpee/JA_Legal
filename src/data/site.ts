@@ -1,93 +1,98 @@
-export const firm = {
-  name: "Jiménez & Ariza Asociados",
-  email: "jimenezarizaasociados@gmail.com",
-  phone: "(312) 214-9562",
-  phoneHref: "+573122149562",
-  cities: "Bogotá D.C. / Barranquilla",
-  tagline: "Estrategia legal con resultados reales.",
-};
+export interface NavigationItem {
+  label: string;
+  href: string;
+}
 
-export const navigation = [
+export interface ServiceItem {
+  number: string;
+  title: string;
+  description: string;
+}
+
+export interface TeamMember {
+  name: string;
+  role: string;
+  bio: string;
+  initials: string;
+}
+
+export interface FirmInfo {
+  name: string;
+  tagline: string;
+  email: string;
+  phone: string;
+  phoneHref: string;
+  cities: string;
+  address: string;
+}
+
+export const navigation: NavigationItem[] = [
   { label: "La firma", href: "#quienes-somos" },
   { label: "Servicios", href: "#servicios" },
   { label: "Equipo", href: "#equipo" },
   { label: "Contacto", href: "#contacto" },
 ];
 
-export const services = [
+export const services: ServiceItem[] = [
   {
     number: "01",
-    title: "Derecho administrativo",
+    title: "Derecho Civil y Contratos",
     description:
-      "Actuaciones administrativas, recursos, peticiones, tutelas y defensa frente a entidades públicas.",
+      "Asesoría y representación en litigios contractuales, restitución de inmuebles, responsabilidad civil y estructuración de acuerdos comerciales y patrimoniales.",
   },
   {
     number: "02",
-    title: "Derecho de los negocios",
+    title: "Derecho Comercial y Societario",
     description:
-      "Asesoría empresarial, contratos, constitución de sociedades y acompañamiento comercial.",
+      "Constitución de sociedades, gobierno corporativo, cobro ejecutivo de títulos valores, insolvencia y acompañamiento jurídico continuo a empresas.",
   },
   {
     number: "03",
-    title: "Insolvencia",
+    title: "Derecho Laboral y Seguridad Social",
     description:
-      "Negociación de deudas para persona natural no comerciante y pequeño comerciante.",
+      "Defensa patronal y representación de trabajadores en despidos injustificados, liquidación de prestaciones, fueros de estabilidad y auditorías laborales preventivas.",
   },
   {
     number: "04",
-    title: "Derecho civil",
+    title: "Derecho Inmobiliario y Urbano",
     description:
-      "Procesos de pertenencia, obligaciones, arrendamientos, responsabilidad y recuperación de cartera.",
+      "Estudio de títulos, contratos de compraventa y arrendamiento comercial, saneamiento de predios y trámites notariales de alta complejidad.",
   },
   {
     number: "05",
-    title: "Contratación",
+    title: "Derecho de Familia y Sucesiones",
     description:
-      "Elaboración, revisión y negociación de contratos nacionales e internacionales.",
+      "Tramitación notarial y judicial de sucesiones de común acuerdo o contenciosas, liquidación de sociedades conyugales y partición patrimonial.",
   },
   {
     number: "06",
-    title: "Protección patrimonial",
+    title: "Litigio Estratégico y Arbitraje",
     description:
-      "Estructuración societaria, organización familiar y planeación jurídica del patrimonio.",
-  },
-  {
-    number: "07",
-    title: "Tránsito y transporte",
-    description:
-      "Defensa frente a comparendos, actuaciones sancionatorias y trámites administrativos.",
-  },
-  {
-    number: "08",
-    title: "Propiedad intelectual",
-    description:
-      "Registro de marcas y protección jurídica de activos comerciales e identidad empresarial.",
+      "Defensa técnica ante jueces de la República, tribunales de arbitramento y entidades administrativas, con enfoque analítico orientado a resultados.",
   },
 ];
 
-export const team = [
+export const team: TeamMember[] = [
   {
-    initials: "MJ",
     name: "Marlon David Jiménez Padilla",
-    role: "Socio fundador",
-    bio: "Abogado de la Universidad Libre, actualmente cursando la Especialización en Derecho de los Negocios en la Universidad Externado de Colombia. Cuenta con experiencia en derecho administrativo, comercial, contratación, análisis normativo, derecho procesal, insolvencia y gestión documental.",
+    role: "Socio Fundador · Director de Litigios",
+    bio: "Abogado especialista en Derecho Procesal y Litigio Civil y Comercial. Con amplia trayectoria en representación ante juzgados de circuito y tribunales.",
+    initials: "MJ",
   },
   {
-    initials: "SA",
     name: "Sebastián Elías Ariza Fontalvo",
-    role: "Socio fundador",
-    bio: "Abogado de la Universidad Libre, con conocimientos sólidos en derecho administrativo, civil, laboral, procesal y constitucional. Se caracteriza por su análisis jurídico, redacción precisa y orientación a la resolución eficaz de conflictos.",
-  },
-  {
-    initials: "PJ",
-    name: "Pedro José Jiménez Peroza",
-    role: "Consultor",
-    bio: "Abogado especialista en Derecho Probatorio y Derecho Laboral, con amplia trayectoria en litigio, asesoría jurídica, derecho público, laboral, probatorio y administrativo.",
-  },
-  {
-    initials: "LP",
-    name: "Lucía Karina Padilla Santamaría",
-    role: "Consultora",
-    bio: "Abogada con especialización y maestría en Derecho Administrativo. Cuenta con amplia experiencia en derechos humanos, defensa penal, conciliación, derecho civil, comercial y mecanismos alternativos de solución de conflictos.",
+    role: "Socio Fundador · Asuntos Corporativos y Laborales",
+    bio: "Abogado enfocado en asesoría corporativa, estructuración contractual y negociación estratégica para pequeñas y medianas empresas nacionales.",
+    initials: "SA",
   },
 ];
+
+export const firm: FirmInfo = {
+  name: "Jiménez & Ariza Asociados",
+  tagline: "Estrategia jurídica y soluciones claras para personas y empresas.",
+  email: "contacto@jalegal.com.co",
+  phone: "+57 (310) 845-9201",
+  phoneHref: "+573108459201",
+  cities: "Bogotá · Barranquilla · Medellín",
+  address: "Calle 93 # 14-20, Oficina 502, Bogotá D.C.",
+};

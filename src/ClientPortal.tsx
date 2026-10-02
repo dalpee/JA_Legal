@@ -1,13 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
-import logo from "../assets/ja-legal-logo.svg";
-import { supabase, switchUserSession, getStoredCase, saveStoredCase, getStoredAgenda, saveStoredAgenda, getStoredHistory, saveStoredHistory, getStoredDocuments, saveStoredDocuments, resetAllToDefault } from "../lib/supabaseClient";
-import { defaultProfile, firmProfile, caseTemplates } from "../data/initialData";
-import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem } from "../types/portal";
-import { CaseEditorDrawer } from "./CaseEditorDrawer";
-import { PresentationBanner } from "./PresentationBanner";
-import { DocumentModal } from "./DocumentModal";
-import { Sliders, Sparkles, Eye, CheckCircle2, ArrowRight, Scale, FileText } from "./icons";
+import logo from "./assets/ja-legal-logo.svg";
+import { supabase, switchUserSession, getStoredCase, saveStoredCase, getStoredAgenda, saveStoredAgenda, getStoredHistory, saveStoredHistory, getStoredDocuments, saveStoredDocuments, resetAllToDefault } from "./lib/supabaseClient";
+import { defaultProfile, firmProfile, caseTemplates } from "./data/initialData";
+import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem } from "./types/portal";
+import { CaseEditorDrawer } from "./components/CaseEditorDrawer";
+import { PresentationBanner } from "./components/PresentationBanner";
+import { DocumentModal } from "./components/DocumentModal";
+import { Sliders, Sparkles, Eye, CheckCircle2, ArrowRight, Scale, FileText } from "./components/icons";
 import "./ClientPortal.css";
 
 interface ClientPortalProps {
@@ -60,10 +60,10 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [authError, setAuthError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Sesión inicial + escucha de cambios (login/logout en cualquier pestaña con tipado estricto)
+  // Sesión inicial + escucha de cambios (login/logout en cualquier pestaña)
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }: { data: { session: Session | null } | any }) => {
-      setSession(data?.session ?? null);
+    supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
+      setSession(data.session);
       setLoadingAuth(false);
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event: string, newSession: Session | null) => {

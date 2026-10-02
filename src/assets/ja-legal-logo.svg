@@ -1,21 +1,30 @@
-<svg width="780" height="180" viewBox="0 0 780 180" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">Jiménez &amp; Ariza Asociados</title>
-  <desc id="desc">Logo de firma jurídica con monograma J y A.</desc>
-  <g transform="translate(24 20)">
-    <rect x="0" y="0" width="140" height="140" rx="8" fill="#071A2E"/>
-    <rect x="8" y="8" width="124" height="124" rx="4" stroke="#D8B56B" stroke-width="4"/>
-    <path d="M44 37V84C44 103 34 111 18 111" stroke="#F0D596" stroke-width="10" stroke-linecap="square"/>
-    <path d="M80 111L108 37L136 111" stroke="#D8B56B" stroke-width="10" stroke-linecap="square" stroke-linejoin="miter"/>
-    <path d="M91 84H124" stroke="#D8B56B" stroke-width="8" stroke-linecap="square"/>
-    <path d="M60 107L78 87" stroke="#F0D596" stroke-width="5" stroke-linecap="square"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 70" fill="none">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f2d790" />
+      <stop offset="50%" stop-color="#d9b56a" />
+      <stop offset="100%" stop-color="#a9812e" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Crest Icon -->
+  <g transform="translate(10, 8)">
+    <!-- Scale icon -->
+    <path d="M26 4 L26 48 M10 16 L42 16" stroke="url(#goldGrad)" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M10 16 L4 32 L16 32 Z" stroke="url(#goldGrad)" stroke-width="2" fill="none"/>
+    <path d="M42 16 L36 32 L48 32 Z" stroke="url(#goldGrad)" stroke-width="2" fill="none"/>
+    <path d="M18 48 L34 48" stroke="url(#goldGrad)" stroke-width="2.5" stroke-linecap="round"/>
+    <!-- Small star / diamond at top -->
+    <polygon points="26,1 28,4 26,7 24,4" fill="url(#goldGrad)"/>
   </g>
-  <g transform="translate(192 43)">
-    <text x="0" y="52" fill="#FFFFFF" font-family="Georgia, 'Times New Roman', serif" font-size="48" font-weight="700">
-      Jiménez &amp; Ariza
-    </text>
-    <text x="2" y="92" fill="#8A6A2E" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="6">
-      ASOCIADOS
-    </text>
-    <path d="M2 112H462" stroke="#D8B56B" stroke-width="3"/>
+
+  <!-- Typography -->
+  <g transform="translate(70, 16)">
+    <!-- Monogram J&A -->
+    <text x="0" y="22" font-family="'Source Serif 4', Georgia, serif" font-size="24" font-weight="700" fill="url(#goldGrad)" letter-spacing="2">J&amp;A</text>
+    
+    <!-- Firm Name -->
+    <text x="68" y="16" font-family="'Source Serif 4', Georgia, serif" font-size="14" font-weight="600" fill="#f4f1e8" letter-spacing="2.5">JIMÉNEZ &amp; ARIZA</text>
+    <text x="70" y="29" font-family="'Inter', sans-serif" font-size="8.5" font-weight="500" fill="#8891a3" letter-spacing="5">ASOCIADOS</text>
   </g>
 </svg>
