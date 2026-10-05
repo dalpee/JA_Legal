@@ -4,7 +4,7 @@ export function FloatingWhatsApp() {
   const number = firm.phoneHref.replace(/\D/g, "");
   return (
     <a
-      href={`https://wa.me/${number}?text=Hola,%20quisiera%20solicitar%20asesor%C3%ADa%20jur%C3%ADdica%20con%20J%26A%20Legal`}
+      href={`https://wa.me/${573122149562}?text=Hola,%20quisiera%20solicitar%20asesor%C3%ADa%20jur%C3%ADdica%20con%20J%26A%20Legal`}
       target="_blank"
       rel="noreferrer"
       className="whatsapp"
