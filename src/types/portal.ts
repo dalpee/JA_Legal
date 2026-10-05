@@ -72,6 +72,22 @@ export type HistoryItem = {
   is_milestone?: boolean;
 };
 
+export type FinancialRecord = {
+  id: string;
+  case_id?: string;
+  client_id?: string;
+  client_name?: string;
+  type: "ingreso" | "egreso";
+  category: "Honorarios" | "Anticipo" | "Cuota de Honorarios" | "Costas Procesales" | "Gastos Notaría / Registro" | "Peritaje Judicial" | "Viáticos y Transporte" | "Operativo Despacho";
+  concept: string;
+  amount: number;
+  date: string;
+  status: "completado" | "pendiente";
+  payment_method: "Transferencia Bancaria" | "PSE" | "Efectivo" | "Cheque";
+  receipt_number: string;
+  notes?: string;
+};
+
 export type CaseTemplate = {
   id: string;
   name: string;

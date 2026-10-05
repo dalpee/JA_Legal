@@ -553,6 +553,80 @@
   text-transform: uppercase;
 }
 
+/* Role Badges */
+.role-badge-firm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(217, 181, 106, 0.15);
+  color: var(--brass-glow);
+  border: 1px solid var(--brass);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.role-badge-client {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid #38bdf8;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Auth Tabs for Real Login/Register */
+.auth-nav-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 20px;
+  gap: 8px;
+}
+.auth-nav-tab {
+  flex: 1;
+  padding: 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.auth-nav-tab.active {
+  color: var(--brass-glow);
+  border-bottom-color: var(--brass);
+}
+.auth-role-select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--ink-soft);
+  border: 1px solid var(--line);
+  color: var(--text-bright);
+  border-radius: 4px;
+  margin-top: 6px;
+  font-size: 0.85rem;
+}
+.auth-success-msg {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid #22c55e;
+  color: #4ade80;
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  margin-bottom: 14px;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .portal-shell { grid-template-columns: 1fr; }

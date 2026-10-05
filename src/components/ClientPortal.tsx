@@ -1,13 +1,29 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import logo from "../assets/ja-legal-logo.svg";
-import { supabase, switchUserSession, getStoredCase, saveStoredCase, getStoredAgenda, saveStoredAgenda, getStoredHistory, saveStoredHistory, getStoredDocuments, saveStoredDocuments, resetAllToDefault } from "../lib/supabaseClient";
+import {
+  supabase,
+  getStoredCase,
+  saveStoredCase,
+  getStoredAgenda,
+  saveStoredAgenda,
+  getStoredHistory,
+  saveStoredHistory,
+  getStoredDocuments,
+  saveStoredDocuments,
+  getStoredFinances,
+  saveStoredFinances,
+  resetAllToDefault,
+} from "../lib/supabaseClient";
 import { defaultProfile, firmProfile, caseTemplates } from "../data/initialData";
-import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem } from "../types/portal";
+import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem, FinancialRecord } from "../types/portal";
 import { CaseEditorDrawer } from "./CaseEditorDrawer";
 import { PresentationBanner } from "./PresentationBanner";
 import { DocumentModal } from "./DocumentModal";
-import { Sliders, Sparkles, Eye, CheckCircle2, ArrowRight, Scale, FileText } from "./icons";
+import { FinanceSection } from "./FinanceSection";
+import { LegalCalculator } from "./LegalCalculator";
+import { SystemArchitectureModal } from "./SystemArchitectureModal";
+import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText } from "./icons";
 import "./ClientPortal.css";
 
 interface ClientPortalProps {
@@ -45,22 +61,33 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [finances, setFinances] = useState<FinancialRecord[]>([]);
   const [loadingData, setLoadingData] = useState(false);
 
-  // Active section in portal
-  const [activeSection, setActiveSection] = useState<"resumen" | "proceso" | "agenda" | "documentos" | "historial">("resumen");
+  // Sección activa en el portal
+  const [activeSection, setActiveSection] = useState<
+    "resumen" | "proceso" | "agenda" | "documentos" | "historial" | "economia" | "calculadora"
+  >("resumen");
 
-  // Case modifier & presentation states
+  // Estados de modales y herramientas
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
+  const [isArchModalOpen, setIsArchModalOpen] = useState(false);
   const [selectedDocForPreview, setSelectedDocForPreview] = useState<DocumentItem | null>(null);
 
+  // Estados de Autenticación Real
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [regFullName, setRegFullName] = useState("");
+  const [regRole, setRegRole] = useState<"client" | "firm">("client");
+  const [regIdNumber, setRegIdNumber] = useState("");
+  const [regPhone, setRegPhone] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Sesión inicial + escucha de cambios (login/logout en cualquier pestaña con tipado estricto)
+  // Sesión inicial + escucha de cambios
   useEffect(() => {
     supabase.auth.getSession().then(({ data }: { data: { session: Session | null } | any }) => {
       setSession(data?.session ?? null);
@@ -72,7 +99,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // Carga perfil + caso + agenda + historial cuando hay sesión
+  // Carga de datos al autenticarse
   useEffect(() => {
     if (!session) {
       setProfile(null);
@@ -80,6 +107,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       setAgenda([]);
       setHistory([]);
       setDocuments([]);
+      setFinances([]);
       return;
     }
 
@@ -94,11 +122,22 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
         .single();
 
       if (cancelled) return;
-      if (!profileData) {
-        setProfile(defaultProfile);
-      } else {
-        setProfile(profileData);
-      }
+
+      const userRole = session.user.user_metadata?.role || profileData?.role || "client";
+      const userName = session.user.user_metadata?.full_name || profileData?.full_name || (userRole === "firm" ? "Dra. Carolina Jiménez Ariza" : "Dr. Roberto Mendoza Vargas");
+      const initials = userName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || "JA";
+
+      const activeProfile: Profile = {
+        id: session.user.id,
+        full_name: userName,
+        initials,
+        role: userRole,
+        email: session.user.email,
+        id_number: session.user.user_metadata?.id_number || (userRole === "firm" ? "T.P. 182.904 C.S.J." : "C.C. 79.432.891"),
+        phone: session.user.user_metadata?.phone || "",
+      };
+
+      setProfile(activeProfile);
 
       const { data: caseData } = await supabase
         .from("cases")
@@ -113,16 +152,18 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
       const caseIdToUse = caseData?.id || "case_001_restitucion";
 
-      const [agendaRes, historyRes, docsRes] = await Promise.all([
+      const [agendaRes, historyRes, docsRes, finRes] = await Promise.all([
         supabase.from("agenda_items").select("*").eq("case_id", caseIdToUse).order("event_date", { ascending: true }),
         supabase.from("history_items").select("*").eq("case_id", caseIdToUse).order("event_date", { ascending: false }),
         supabase.from("documents").select("*").eq("case_id", caseIdToUse),
+        supabase.from("financial_records").select("*"),
       ]);
 
       if (!cancelled) {
         setAgenda(agendaRes.data && agendaRes.data.length > 0 ? agendaRes.data : getStoredAgenda());
         setHistory(historyRes.data && historyRes.data.length > 0 ? historyRes.data : getStoredHistory());
         setDocuments(docsRes.data && docsRes.data.length > 0 ? docsRes.data : getStoredDocuments());
+        setFinances(finRes.data && finRes.data.length > 0 ? finRes.data : getStoredFinances());
         setLoadingData(false);
       }
     })();
@@ -160,6 +201,35 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
   const handleUpdateProfile = (updated: Profile) => {
     setProfile(updated);
+  };
+
+  // Finanzas del despacho
+  const handleAddTransaction = (newRecord: FinancialRecord) => {
+    const updated = [newRecord, ...finances];
+    setFinances(updated);
+    saveStoredFinances(updated);
+    if (newRecord.type === "ingreso" && caseRecord) {
+      const newBal = Math.max(0, (caseRecord.balance || 0) - newRecord.amount);
+      handleUpdateCase({
+        ...caseRecord,
+        balance: newBal,
+      });
+    }
+  };
+
+  const handleDeleteTransaction = (id: string) => {
+    const updated = finances.filter((f) => f.id !== id);
+    setFinances(updated);
+    saveStoredFinances(updated);
+  };
+
+  const handleApplyLiquidationToCase = (summary: string, totalAmount: number) => {
+    if (caseRecord) {
+      handleUpdateCase({
+        ...caseRecord,
+        observations: `${caseRecord.observations ? caseRecord.observations + "\n\n" : ""}[Liquidación Judicial Activa]: ${summary}`,
+      });
+    }
   };
 
   const handleLoadTemplate = (templateId: string) => {
@@ -203,39 +273,104 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       setAgenda(getStoredAgenda());
       setHistory(getStoredHistory());
       setDocuments(getStoredDocuments());
+      setFinances(getStoredFinances());
       setProfile(defaultProfile);
     }
   };
 
   const handleToggleRole = () => {
     const nextRole = profile?.role === "client" ? "firm" : "client";
-    const nextProfile = nextRole === "client" ? defaultProfile : firmProfile;
+    const nextProfile: Profile = {
+      ...(profile || defaultProfile),
+      role: nextRole,
+      full_name: nextRole === "firm" ? "Dra. Carolina Jiménez Ariza" : "Dr. Roberto Mendoza Vargas",
+      initials: nextRole === "firm" ? "CJ" : "RM",
+    };
     setProfile(nextProfile);
-    switchUserSession(nextRole);
   };
 
   const handlePrintReport = () => {
     window.print();
   };
 
+  // Login de Usuario Real
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
     setAuthError(null);
+    setAuthSuccess(null);
     setSubmitting(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setSubmitting(false);
-    if (error) setAuthError("Correo o contraseña incorrectos.");
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setAuthError(error.message || "Credenciales incorrectas. Verifique su correo y contraseña.");
+      } else if (data?.session) {
+        setSession(data.session);
+      }
+    } catch (err: any) {
+      setAuthError(err.message || "Error al intentar iniciar sesión.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Registro de Nuevo Usuario Real
+  async function handleRegister(event: FormEvent) {
+    event.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+
+    if (!regFullName.trim() || !email.trim() || !password) {
+      setAuthError("Por favor complete todos los campos obligatorios.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setAuthError("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            full_name: regFullName.trim(),
+            role: regRole,
+            id_number: regIdNumber.trim(),
+            phone: regPhone.trim(),
+          },
+        },
+      });
+
+      if (error) {
+        setAuthError(error.message || "No se pudo crear la cuenta. Intente con otro correo.");
+      } else {
+        setAuthSuccess(`¡Usuario registrado con éxito como ${regRole === "firm" ? "Abogado" : "Cliente"}!`);
+        if (data?.session) {
+          setSession(data.session);
+        } else {
+          setAuthMode("login");
+        }
+      }
+    } catch (err: any) {
+      setAuthError(err.message || "Error al registrar el usuario.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleLogout() {
     await supabase.auth.signOut();
+    setSession(null);
+    setProfile(null);
   }
-
-  const handleQuickDemoAccess = (role: "client" | "firm") => {
-    setAuthError(null);
-    const mockEmail = role === "firm" ? "abogado@jalegal.com.co" : "cliente@ejemplo.com";
-    supabase.auth.signInWithPassword({ email: mockEmail, password: "demo" });
-  };
 
   const handleBack = () => {
     if (onBackToSite) {
@@ -246,13 +381,16 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   };
 
   if (loadingAuth) {
-    return <div className="portal-loading">Cargando…</div>;
+    return <div className="portal-loading">Verificando sesión segura…</div>;
   }
 
+  // VISTA AUTENTICADA (DASHBOARD)
   if (session && profile) {
+    const isFirm = profile.role === "firm";
+
     return (
       <main className="portal-dashboard">
-        {/* Top Simulation & Presentation Bar */}
+        {/* Barra superior de herramientas y simulación */}
         <PresentationBanner
           onOpenEditor={() => setIsEditorOpen(true)}
           onLoadTemplate={handleLoadTemplate}
@@ -274,22 +412,34 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               <span>Sistema integral de gestión jurídica</span>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <button
-              type="button"
-              onClick={() => setIsEditorOpen(true)}
-              className="portal-logout"
-              style={{
-                borderColor: "var(--brass)",
-                color: "var(--brass-light)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "5px",
-              }}
-            >
-              <Sliders size={14} />
-              <span>Modificar Caso</span>
-            </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            {/* Rol Visible en Topbar */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "0.82rem", color: "var(--text-bright)", fontWeight: 500 }}>
+                {profile.full_name}
+              </span>
+              <span className={isFirm ? "role-badge-firm" : "role-badge-client"}>
+                {isFirm ? "⚖️ Abogado / Firma" : "👤 Cliente Titular"}
+              </span>
+            </div>
+
+            {isFirm && (
+              <button
+                type="button"
+                onClick={() => setIsEditorOpen(true)}
+                className="portal-logout"
+                style={{
+                  borderColor: "var(--brass)",
+                  color: "var(--brass-light)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                }}
+              >
+                <Sliders size={14} />
+                <span>Gestionar Proceso</span>
+              </button>
+            )}
             <button className="portal-logout" type="button" onClick={handleLogout}>
               Cerrar sesión
             </button>
@@ -302,7 +452,14 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               <span>{profile.initials}</span>
               <div>
                 <strong>{profile.full_name}</strong>
-                <small>{profile.role === "client" ? "Cliente" : "Firma"}</small>
+                <span className={isFirm ? "role-badge-firm" : "role-badge-client"} style={{ marginTop: "4px" }}>
+                  {isFirm ? "⚖️ Abogado / Firma" : "👤 Cliente Titular"}
+                </span>
+                {profile.id_number && (
+                  <small style={{ display: "block", color: "var(--text-muted)", fontSize: "0.7rem", marginTop: "2px" }}>
+                    {profile.id_number}
+                  </small>
+                )}
               </div>
             </div>
 
@@ -344,355 +501,360 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               >
                 <span>Historial</span>
               </button>
-            </nav>
 
-            {/* Quick Demonstration CTA in Sidebar */}
-            <div
-              style={{
-                padding: "16px",
-                background: "var(--ink-panel)",
-                border: "1px solid var(--brass)",
-                borderRadius: "4px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--brass-light)", fontSize: "0.8rem", fontWeight: 600 }}>
-                <Sparkles size={14} />
-                <span>Simulador del Caso</span>
-              </div>
-              <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
-                Ajuste el porcentaje, audiencias y actuaciones para mostrar el avance en tiempo real.
-              </p>
+              {/* Pestaña: Economía & Honorarios */}
               <button
                 type="button"
-                onClick={() => setIsEditorOpen(true)}
+                className={activeSection === "economia" ? "active" : ""}
+                onClick={() => setActiveSection("economia")}
                 style={{
-                  padding: "8px 12px",
-                  background: "var(--brass)",
-                  color: "var(--ink)",
-                  fontWeight: 600,
-                  fontSize: "0.8rem",
-                  border: "none",
-                  borderRadius: "3px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "6px",
+                  borderLeft: activeSection === "economia" ? "3px solid #4ade80" : "none",
                 }}
               >
-                <Sliders size={14} />
-                <span>Modificar Caso</span>
+                <span>Economía & Honorarios</span>
+                <small style={{ color: isFirm ? "#4ade80" : "var(--brass)", fontWeight: 700 }}>
+                  $ COP
+                </small>
               </button>
-            </div>
 
-            <p className="portal-private">Sesión verificada con Supabase Auth</p>
-          </aside>
+              {/* Pestaña: Liquidador Judicial (LegalTech) */}
+              <button
+                type="button"
+                className={activeSection === "calculadora" ? "active" : ""}
+                onClick={() => setActiveSection("calculadora")}
+                style={{
+                  borderLeft: activeSection === "calculadora" ? "3px solid var(--brass)" : "none",
+                }}
+              >
+                <span>Liquidador Judicial</span>
+                <small style={{ color: "var(--brass-light)" }}>LegalTech</small>
+              </button>
+            </nav>
 
-          <section className="portal-content" id="resumen">
-            {loadingData && <p className="portal-loading-inline">Cargando información del caso…</p>}
-
-            {!loadingData && !caseRecord && (
-              <div className="portal-empty">
-                <h2>Aún no hay un proceso asociado a su cuenta</h2>
-                <p>En cuanto la firma registre su caso, aparecerá aquí automáticamente.</p>
+            {/* Panel de control rápido para abogados */}
+            {isFirm ? (
+              <div
+                style={{
+                  padding: "16px",
+                  background: "var(--ink-panel)",
+                  border: "1px solid var(--brass)",
+                  borderRadius: "4px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--brass-light)", fontSize: "0.8rem", fontWeight: 600 }}>
+                  <Scale size={14} />
+                  <span>Panel del Abogado</span>
+                </div>
+                <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
+                  Actualice etapas, radicación de memoriales y registre pagos de honorarios para su cliente.
+                </p>
                 <button
                   type="button"
-                  onClick={() => handleLoadTemplate("tpl_civil_restitucion")}
-                  className="btn primary"
-                  style={{ marginTop: "16px" }}
+                  onClick={() => setIsEditorOpen(true)}
+                  style={{
+                    padding: "8px 12px",
+                    background: "var(--brass)",
+                    color: "var(--ink)",
+                    fontWeight: 600,
+                    fontSize: "0.8rem",
+                    border: "none",
+                    borderRadius: "3px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                  }}
                 >
-                  Cargar Caso de Ejemplo
+                  <Sliders size={14} />
+                  <span>Modificar Variables</span>
                 </button>
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: "14px",
+                  background: "rgba(56, 189, 248, 0.05)",
+                  border: "1px solid rgba(56, 189, 248, 0.2)",
+                  borderRadius: "4px",
+                }}
+              >
+                <span style={{ fontSize: "0.75rem", color: "#38bdf8", fontWeight: 600, display: "block", marginBottom: "4px" }}>
+                  Atención Jurídica Directa
+                </span>
+                <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                  Su apoderado legal es el Dr. Marlon Jiménez. Cualquier novedad es notificada en este portal.
+                </p>
               </div>
             )}
 
-            {caseRecord && (
+            <button
+              type="button"
+              onClick={() => setIsArchModalOpen(true)}
+              style={{
+                background: "transparent",
+                border: "1px dashed var(--line)",
+                color: "var(--text-muted)",
+                fontSize: "0.72rem",
+                padding: "8px 10px",
+                borderRadius: "4px",
+                cursor: "pointer",
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                width: "100%",
+                transition: "all 0.2s ease",
+              }}
+              title="Ficha técnica de ingeniería de sistemas"
+            >
+              <span>📐 Especificación & Auditoría</span>
+            </button>
+
+            <p className="portal-private">
+              Sesión verificada con Supabase Auth
+            </p>
+          </aside>
+
+          <section className="portal-content" id="resumen">
+            {loadingData && <p className="portal-loading-inline">Cargando información procesal…</p>}
+
+            {/* SECCIÓN NUEVA: ECONOMÍA & HONORARIOS */}
+            {activeSection === "economia" && (
+              <FinanceSection
+                finances={finances}
+                onAddTransaction={handleAddTransaction}
+                onDeleteTransaction={handleDeleteTransaction}
+                userProfile={profile}
+                caseRecord={caseRecord}
+              />
+            )}
+
+            {/* SECCIÓN NUEVA: LIQUIDADOR JUDICIAL */}
+            {activeSection === "calculadora" && (
+              <LegalCalculator onApplyToCase={handleApplyLiquidationToCase} />
+            )}
+
+            {!loadingData && !caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && (
+              <div className="portal-empty">
+                <h2>Aún no hay un proceso asociado a su cuenta</h2>
+                <p>En cuanto la firma registre su caso, aparecerá aquí automáticamente.</p>
+                {isFirm && (
+                  <button
+                    type="button"
+                    onClick={() => handleLoadTemplate("tpl_civil_restitucion")}
+                    className="btn primary"
+                    style={{ marginTop: "16px" }}
+                  >
+                    Cargar Caso de Prueba
+                  </button>
+                )}
+              </div>
+            )}
+
+            {caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && (
               <>
                 <div className="content-header">
                   <div>
-                    <p className="kicker">Bienvenido de nuevo</p>
+                    <p className="kicker">
+                      {isFirm ? "Gestión Procesal del Despacho" : "Portal del Cliente Titular"}
+                    </p>
                     <h1>
-                      {activeSection === "resumen" && "Resumen del caso"}
+                      {activeSection === "resumen" && "Resumen General del Caso"}
                       {activeSection === "proceso" && "Fases y Detalles del Proceso"}
-                      {activeSection === "agenda" && "Calendario y Audiencias"}
+                      {activeSection === "agenda" && "Calendario y Audiencias Judiciales"}
                       {activeSection === "documentos" && "Expediente Digital"}
-                      {activeSection === "historial" && "Historial de Actuaciones"}
+                      {activeSection === "historial" && "Cuaderno de Actuaciones"}
                     </h1>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <span className="status-pill">{caseRecord.status}</span>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditorOpen(true)}
-                      style={{
-                        padding: "6px 12px",
-                        fontSize: "0.78rem",
-                        fontWeight: 600,
-                        background: "rgba(217, 181, 106, 0.15)",
-                        border: "1px solid var(--brass)",
-                        color: "var(--brass-light)",
-                        borderRadius: "3px",
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "6px",
-                      }}
-                    >
-                      <Sliders size={14} />
-                      <span>Modificar</span>
-                    </button>
+                    {isFirm && (
+                      <button
+                        type="button"
+                        onClick={() => setIsEditorOpen(true)}
+                        style={{
+                          padding: "6px 12px",
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          background: "rgba(217, 181, 106, 0.15)",
+                          border: "1px solid var(--brass)",
+                          color: "var(--brass-light)",
+                          borderRadius: "3px",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}
+                      >
+                        <Sliders size={14} />
+                        <span>Editar Caso</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 <article className="case-hero" id="proceso">
                   <div className="case-hero-main">
-                    <p className="kicker">Proceso principal · {caseRecord.process_type || "Litigio General"}</p>
+                    <span className="label">{caseRecord.process_type}</span>
                     <h2>{caseRecord.title}</h2>
+                    <p className="case-authority">
+                      <strong>Radicado:</strong> {caseRecord.id.toUpperCase()} ·{" "}
+                      <strong>Despacho:</strong> {caseRecord.authority || "Juzgado Civil del Circuito"}
+                    </p>
+                    <p className="case-desc">
+                      {caseRecord.observations ||
+                        "Proceso en trámite preferencial con apoderamiento activo y cumplimiento estricto de términos legales."}
+                    </p>
 
-                    <dl className="case-details">
+                    <div className="case-metadata-grid">
                       <div>
-                        <dt>Radicado</dt>
-                        <dd style={{ fontFamily: "monospace", color: "var(--brass-light)" }}>
-                          {caseRecord.filed_date ?? "—"}
-                        </dd>
+                        <span>Ciudad:</span>
+                        <strong>{caseRecord.city}</strong>
                       </div>
                       <div>
-                        <dt>Autoridad</dt>
-                        <dd>{caseRecord.authority ?? "—"}</dd>
+                        <span>Fecha Radicación:</span>
+                        <strong>{formatLong(caseRecord.filed_date)}</strong>
                       </div>
                       <div>
-                        <dt>Abogado encargado</dt>
-                        <dd>{caseRecord.lawyer ?? "—"}</dd>
+                        <span>Abogado Titular:</span>
+                        <strong>{caseRecord.lawyer || "Dra. Carolina Jiménez Ariza"}</strong>
                       </div>
                       <div>
-                        <dt>Última actualización</dt>
-                        <dd>{formatLong(caseRecord.last_update)}</dd>
+                        <span>Última Actualización:</span>
+                        <strong>{formatLong(caseRecord.last_update)}</strong>
                       </div>
-                    </dl>
+                    </div>
                   </div>
 
                   <div className="case-hero-progress">
-                    <div
-                      className="progress-ring"
-                      style={{ ["--pct" as string]: caseRecord.progress, cursor: "pointer" }}
-                      onClick={() => setIsEditorOpen(true)}
-                      title="Haga clic para modificar el avance"
-                    >
-                      <span>{caseRecord.progress}%</span>
+                    <span className="progress-number">{caseRecord.progress}%</span>
+                    <span className="progress-label">Avance Procesal</span>
+                    <div className="progress-bar-bg">
+                      <div className="progress-bar-fill" style={{ width: `${caseRecord.progress}%` }} />
                     </div>
-                    <p>Avance general del proceso</p>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditorOpen(true)}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--brass)",
-                        fontSize: "0.75rem",
-                        cursor: "pointer",
-                        textDecoration: "underline",
-                      }}
-                    >
-                      Ajustar %
-                    </button>
+                    <small>Fase actual: {caseRecord.current_phase || "Instrucción y Juzgamiento"}</small>
                   </div>
                 </article>
-
-                <div className="portal-stats">
-                  <article style={{ cursor: "pointer" }} onClick={() => setActiveSection("proceso")}>
-                    <span>Procesos activos</span>
-                    <strong>1</strong>
-                    <small>En seguimiento</small>
-                  </article>
-                  <article style={{ cursor: "pointer" }} onClick={() => setActiveSection("agenda")}>
-                    <span>Próximo evento</span>
-                    <strong>
-                      {agenda[0] ? `${formatDay(agenda[0].event_date).day} ${formatDay(agenda[0].event_date).month}` : "—"}
-                    </strong>
-                    <small>{agenda[0]?.title ?? "Sin eventos próximos"}</small>
-                  </article>
-                  <article>
-                    <span>Saldo pendiente</span>
-                    <strong style={{ color: "var(--sage)" }}>${caseRecord.balance.toLocaleString("es-CO")}</strong>
-                    <small>Honorarios fijados</small>
-                  </article>
-                  <article style={{ cursor: "pointer" }} onClick={() => setActiveSection("documentos")}>
-                    <span>Documentos</span>
-                    <strong>{documents.length || caseRecord.documents_count}</strong>
-                    <small>Disponibles</small>
-                  </article>
-                </div>
 
                 {/* TAB: RESUMEN */}
                 {activeSection === "resumen" && (
                   <div className="portal-main-grid">
-                    <article className="portal-panel" id="agenda">
+                    {/* Próximas Citas y Audiencias */}
+                    <article className="portal-panel">
                       <div className="panel-title-row">
                         <div>
-                          <p className="kicker">Próximamente</p>
-                          <h2>Agenda</h2>
+                          <p className="kicker">Diligencias Clave</p>
+                          <h2>Próximas Audiencias</h2>
                         </div>
-                        <button type="button" onClick={() => setActiveSection("agenda")}>
-                          Ver calendario
-                        </button>
+                        {isFirm && (
+                          <button type="button" onClick={() => setIsEditorOpen(true)}>
+                            + Agendar
+                          </button>
+                        )}
                       </div>
 
                       <div className="agenda-list">
-                        {agenda.length === 0 && <p className="portal-empty-note">No hay eventos programados.</p>}
                         {agenda.slice(0, 3).map((item) => {
                           const { day, month } = formatDay(item.event_date);
                           return (
                             <div className="agenda-item" key={item.id}>
-                              <time>
+                              <div className="agenda-date">
                                 <strong>{day}</strong>
                                 <span>{month}</span>
-                              </time>
-                              <div>
+                              </div>
+                              <div className="agenda-info">
                                 <h3>{item.title}</h3>
                                 <p>{item.detail}</p>
+                                {item.location && <small>📍 {item.location}</small>}
                               </div>
                             </div>
                           );
                         })}
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setIsEditorOpen(true)}
-                        style={{
-                          marginTop: "12px",
-                          padding: "8px",
-                          background: "var(--parchment-deep)",
-                          border: "1px dashed var(--brass)",
-                          color: "var(--brass-light)",
-                          borderRadius: "4px",
-                          fontSize: "0.78rem",
-                          cursor: "pointer",
-                          textAlign: "center",
-                        }}
-                      >
-                        + Modificar o agendar audiencias
-                      </button>
                     </article>
 
-                    <article className="portal-panel history-panel" id="historial">
-                      <div className="panel-title-row">
-                        <div>
-                          <p className="kicker">Historial</p>
-                          <h2>Últimas actuaciones</h2>
-                        </div>
-                        <button type="button" onClick={() => setActiveSection("historial")}>
-                          Ver proceso completo
-                        </button>
-                      </div>
-
-                      <div className="timeline">
-                        {history.length === 0 && <p className="portal-empty-note">Aún no hay actuaciones registradas.</p>}
-                        {history.slice(0, 4).map((item) => (
-                          <div className="timeline-item" key={item.id}>
-                            <span className="timeline-dot" />
-                            <div className="timeline-body">
-                              <time>{formatLong(item.event_date)}</time>
-                              <h3>{item.title}</h3>
-                              <p>{item.detail}</p>
-                              {item.note && <small>{item.note}</small>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setIsEditorOpen(true)}
-                        style={{
-                          marginTop: "12px",
-                          padding: "8px",
-                          background: "var(--parchment-deep)",
-                          border: "1px dashed var(--brass)",
-                          color: "var(--brass-light)",
-                          borderRadius: "4px",
-                          fontSize: "0.78rem",
-                          cursor: "pointer",
-                          textAlign: "center",
-                        }}
-                      >
-                        + Agregar actuación procesal
-                      </button>
-                    </article>
-                  </div>
-                )}
-
-                {/* TAB: PROCESO */}
-                {activeSection === "proceso" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+                    {/* Resumen Económico Rápido */}
                     <article className="portal-panel">
                       <div className="panel-title-row">
                         <div>
-                          <p className="kicker">Estructura Procesal</p>
-                          <h2>Fases del Litigio</h2>
+                          <p className="kicker">Estado Financiero</p>
+                          <h2>Honorarios del Proceso</h2>
                         </div>
-                        <button type="button" onClick={() => setIsEditorOpen(true)}>
-                          Modificar fases en vivo
+                        <button type="button" onClick={() => setActiveSection("economia")}>
+                          Ver detalle
                         </button>
                       </div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginTop: "14px" }}>
-                        {[
-                          { step: "Fase 1", name: "Radicación y Admisión", desc: "Presentación de la demanda y auto admisorio.", completed: caseRecord.progress >= 25 },
-                          { step: "Fase 2", name: "Notificación y Cautelares", desc: "Medidas cautelares de embargo y traslado a contraparte.", completed: caseRecord.progress >= 50 },
-                          { step: "Fase 3", name: "Pruebas y Audiencia", desc: "Recepción de testimonios, peritajes y alegatos.", completed: caseRecord.progress >= 75 },
-                          { step: "Fase 4", name: "Sentencia y Ejecución", desc: "Emisión de fallo definitivo y liquidación de costas.", completed: caseRecord.progress >= 100 },
-                        ].map((phase, idx) => (
-                          <div
-                            key={idx}
-                            style={{
-                              padding: "16px",
-                              background: phase.completed ? "rgba(127, 174, 143, 0.08)" : "var(--parchment-deep)",
-                              border: phase.completed ? "1px solid var(--sage)" : "1px solid var(--line)",
-                              borderRadius: "4px",
-                            }}
-                          >
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-                              <span style={{ fontSize: "0.72rem", color: "var(--brass)", fontWeight: 600 }}>{phase.step}</span>
-                              {phase.completed && <CheckCircle2 size={16} color="var(--sage)" />}
-                            </div>
-                            <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>{phase.name}</h4>
-                            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>{phase.desc}</p>
-                          </div>
-                        ))}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginTop: "16px" }}>
+                        <div style={{ background: "var(--parchment-deep)", padding: "14px", borderRadius: "4px" }}>
+                          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Total Pactado</span>
+                          <p style={{ margin: "4px 0 0", fontSize: "1.2rem", fontWeight: 700, color: "var(--text-bright)" }}>
+                            ${new Intl.NumberFormat("es-CO").format(caseRecord.total_fees || 18000000)}
+                          </p>
+                        </div>
+                        <div style={{ background: "var(--parchment-deep)", padding: "14px", borderRadius: "4px" }}>
+                          <span style={{ fontSize: "0.75rem", color: "var(--brass)" }}>Saldo Pendiente</span>
+                          <p style={{ margin: "4px 0 0", fontSize: "1.2rem", fontWeight: 700, color: "#f87171" }}>
+                            ${new Intl.NumberFormat("es-CO").format(caseRecord.balance || 4500000)}
+                          </p>
+                        </div>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveSection("economia")}
+                        style={{
+                          width: "100%",
+                          marginTop: "16px",
+                          padding: "10px",
+                          background: "var(--parchment-deep)",
+                          border: "1px solid var(--line)",
+                          color: "var(--brass-light)",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Ir al Módulo Financiero Completo →
+                      </button>
                     </article>
                   </div>
                 )}
 
-                {/* TAB: AGENDA COMPLETA */}
+                {/* TAB: CALENDARIO */}
                 {activeSection === "agenda" && (
                   <article className="portal-panel">
                     <div className="panel-title-row">
                       <div>
-                        <p className="kicker">Calendario</p>
-                        <h2>Todas las Audiencias y Fechas de Términos</h2>
+                        <p className="kicker">Calendario Judicial</p>
+                        <h2>Audiencias y Términos</h2>
                       </div>
-                      <button type="button" onClick={() => setIsEditorOpen(true)}>
-                        + Agregar evento en el editor
-                      </button>
+                      {isFirm && (
+                        <button type="button" onClick={() => setIsEditorOpen(true)}>
+                          + Programar Diligencia
+                        </button>
+                      )}
                     </div>
 
-                    <div className="agenda-list" style={{ marginTop: "14px" }}>
+                    <div className="agenda-list" style={{ marginTop: "16px" }}>
                       {agenda.map((item) => {
                         const { day, month } = formatDay(item.event_date);
                         return (
                           <div className="agenda-item" key={item.id}>
-                            <time>
+                            <div className="agenda-date">
                               <strong>{day}</strong>
                               <span>{month}</span>
-                            </time>
-                            <div>
+                            </div>
+                            <div className="agenda-info">
                               <h3>{item.title}</h3>
                               <p>{item.detail}</p>
+                              {item.location && <small>📍 {item.location}</small>}
+                              {item.type && <span style={{ marginLeft: "10px", fontSize: "0.72rem", color: "var(--brass)" }}>[{item.type}]</span>}
                             </div>
                           </div>
                         );
@@ -709,9 +871,11 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                         <p className="kicker">Expediente Oficial</p>
                         <h2>Documentos del Caso</h2>
                       </div>
-                      <button type="button" onClick={() => setIsEditorOpen(true)}>
-                        + Gestionar archivos
-                      </button>
+                      {isFirm && (
+                        <button type="button" onClick={() => setIsEditorOpen(true)}>
+                          + Gestionar archivos
+                        </button>
+                      )}
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", marginTop: "16px" }}>
@@ -759,7 +923,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => alert(`Descargando copia legal de: ${doc.name}`)}
+                                onClick={() => alert(`Descargando copia legal: ${doc.name}`)}
                                 style={{
                                   background: "var(--brass)",
                                   border: "none",
@@ -789,9 +953,11 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                         <p className="kicker">Línea de Tiempo</p>
                         <h2>Cuaderno de Actuaciones Procesales</h2>
                       </div>
-                      <button type="button" onClick={() => setIsEditorOpen(true)}>
-                        + Agregar actuación
-                      </button>
+                      {isFirm && (
+                        <button type="button" onClick={() => setIsEditorOpen(true)}>
+                          + Agregar actuación
+                        </button>
+                      )}
                     </div>
 
                     <div className="timeline" style={{ marginTop: "18px" }}>
@@ -814,7 +980,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
           </section>
         </div>
 
-        {/* Live Case Modifier Drawer */}
+        {/* Drawer modificador de caso (solo firma) */}
         <CaseEditorDrawer
           isOpen={isEditorOpen}
           onClose={() => setIsEditorOpen(false)}
@@ -836,137 +1002,177 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
           }}
         />
 
-        {/* Document Modal */}
+        {/* Modal de Documentos */}
         <DocumentModal
           document={selectedDocForPreview}
           caseRecord={caseRecord || getStoredCase()}
           onClose={() => setSelectedDocForPreview(null)}
         />
+
+        {/* Modal de Arquitectura del Software (Ingeniería de Sistemas) */}
+        <SystemArchitectureModal
+          isOpen={isArchModalOpen}
+          onClose={() => setIsArchModalOpen(false)}
+        />
       </main>
     );
   }
 
+  // ==========================================
+  // VISTA DE LOGIN Y REGISTRO (SIN BOTONES DE DEMO)
+  // ==========================================
   return (
     <main className="client-portal login-view">
       <button type="button" onClick={handleBack} className="portal-back login-back">
-        ← Volver a la página
+        ← Volver a la página principal
       </button>
 
-      <section className="portal-card login-card">
+      <section className="portal-card login-card" style={{ maxWidth: "440px" }}>
         <img src={logo} alt="Jiménez &amp; Ariza Asociados" className="portal-logo" />
 
-        <p className="kicker">Acceso privado</p>
-        <h1>Seguimiento y gestión de procesos</h1>
-        <p className="portal-text">
-          Consulte el estado de su caso, próximas actuaciones, documentos y novedades compartidas por la firma.
+        <p className="kicker">Acceso Seguro</p>
+        <h1 style={{ fontSize: "1.45rem", marginBottom: "8px" }}>
+          {authMode === "login" ? "Portal de Clientes & Despacho" : "Crear Cuenta en el Sistema"}
+        </h1>
+        <p className="portal-text" style={{ fontSize: "0.85rem", marginBottom: "16px" }}>
+          {authMode === "login"
+            ? "Ingrese con sus credenciales autorizadas para consultar el estado de sus procesos."
+            : "Complete sus datos para habilitar su acceso al sistema de seguimiento procesal."}
         </p>
 
-        {/* Quick Demo Access Bar */}
-        <div
-          style={{
-            marginBottom: "20px",
-            padding: "14px",
-            borderRadius: "4px",
-            background: "rgba(217, 181, 106, 0.08)",
-            border: "1px solid var(--brass)",
-            textAlign: "left",
-          }}
-        >
-          <p
-            style={{
-              margin: "0 0 10px",
-              fontSize: "0.72rem",
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "var(--brass)",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
+        {/* Pestañas: Iniciar Sesión vs Registrarse */}
+        <div className="auth-nav-tabs">
+          <button
+            type="button"
+            className={`auth-nav-tab ${authMode === "login" ? "active" : ""}`}
+            onClick={() => {
+              setAuthMode("login");
+              setAuthError(null);
             }}
           >
-            <Sparkles size={14} />
-            Demostración para Clientes
-          </p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-            <button
-              type="button"
-              onClick={() => handleQuickDemoAccess("client")}
-              style={{
-                padding: "8px 10px",
-                borderRadius: "3px",
-                background: "var(--brass)",
-                color: "var(--ink)",
-                fontWeight: 600,
-                fontSize: "0.78rem",
-                border: "none",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "4px",
-              }}
-            >
-              <span>Ver como Cliente</span>
-              <ArrowRight size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickDemoAccess("firm")}
-              style={{
-                padding: "8px 10px",
-                borderRadius: "3px",
-                background: "var(--parchment-deep)",
-                border: "1px solid var(--line)",
-                color: "var(--text-bright)",
-                fontWeight: 500,
-                fontSize: "0.78rem",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "4px",
-              }}
-            >
-              <Scale size={14} color="var(--brass)" />
-              <span>Acceso Firma</span>
-            </button>
-          </div>
+            Iniciar Sesión
+          </button>
+          <button
+            type="button"
+            className={`auth-nav-tab ${authMode === "register" ? "active" : ""}`}
+            onClick={() => {
+              setAuthMode("register");
+              setAuthError(null);
+            }}
+          >
+            Crear Cuenta
+          </button>
         </div>
 
-        <form className="portal-form" onSubmit={handleLogin}>
-          <label>
-            Correo electrónico
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="cliente@ejemplo.com"
-              required
-            />
-          </label>
+        {authSuccess && <p className="auth-success-msg">{authSuccess}</p>}
+        {authError && <p className="portal-form-error">{authError}</p>}
 
-          <label>
-            Contraseña
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-          </label>
+        {authMode === "login" ? (
+          /* FORMULARIO DE INICIO DE SESIÓN */
+          <form className="portal-form" onSubmit={handleLogin}>
+            <label>
+              Correo electrónico
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="ejemplo@jalegal.com.co"
+                required
+              />
+            </label>
 
-          {authError && <p className="portal-form-error">{authError}</p>}
+            <label>
+              Contraseña
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
+            </label>
 
-          <button className="btn primary" type="submit" disabled={submitting}>
-            {submitting ? "Ingresando…" : "Ingresar al portal"}
-          </button>
-        </form>
+            <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "8px" }}>
+              {submitting ? "Verificando…" : "Ingresar al portal"}
+            </button>
+          </form>
+        ) : (
+          /* FORMULARIO DE REGISTRO CON SELECCIÓN DE ROL */
+          <form className="portal-form" onSubmit={handleRegister}>
+            <label>
+              Nombre Completo *
+              <input
+                type="text"
+                value={regFullName}
+                onChange={(e) => setRegFullName(e.target.value)}
+                placeholder="Dr. Nombre Apellido"
+                required
+              />
+            </label>
 
-        <p className="portal-footnote">
-          ¿No tiene acceso todavía? Comuníquese con la firma para que habiliten su cuenta.
-        </p>
+            <label>
+              Rol en el Sistema *
+              <select
+                className="auth-role-select"
+                value={regRole}
+                onChange={(e) => setRegRole(e.target.value as "client" | "firm")}
+              >
+                <option value="client">👤 Cliente (Titular del Proceso)</option>
+                <option value="firm">⚖️ Abogado / Miembro de la Firma</option>
+              </select>
+            </label>
+
+            <label>
+              Documento de Identificación (C.C. o Tarjeta Profesional)
+              <input
+                type="text"
+                value={regIdNumber}
+                onChange={(e) => setRegIdNumber(e.target.value)}
+                placeholder={regRole === "firm" ? "T.P. 182.904 C.S.J." : "C.C. 1.020.340.550"}
+              />
+            </label>
+
+            <label>
+              Correo electrónico *
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="correo@ejemplo.com"
+                required
+              />
+            </label>
+
+            <label>
+              Contraseña *
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+                required
+              />
+            </label>
+
+            <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "8px" }}>
+              {submitting ? "Creando cuenta…" : "Registrar y Acceder"}
+            </button>
+          </form>
+        )}
+
+        <div style={{ marginTop: "20px", paddingTop: "14px", borderTop: "1px solid var(--line)", textAlign: "left" }}>
+          <p style={{ margin: "0 0 6px", fontSize: "0.72rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
+            Cuentas habilitadas por defecto:
+          </p>
+          <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "4px" }}>
+            <div>
+              <strong style={{ color: "var(--brass)" }}>Abogado:</strong> <code>abogado@jalegal.com.co</code> / Clave: <code>Abogado2026*</code>
+            </div>
+            <div>
+              <strong style={{ color: "#38bdf8" }}>Cliente:</strong> <code>cliente@jalegal.com.co</code> / Clave: <code>Cliente2026*</code>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   );

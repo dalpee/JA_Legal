@@ -91,8 +91,8 @@ export const firm: FirmInfo = {
   name: "Jiménez & Ariza Asociados",
   tagline: "Estrategia jurídica y soluciones claras para personas y empresas.",
   email: "contacto@jalegal.com.co",
-  phone: "+57 (310) 845-9201",
-  phoneHref: "+573108459201",
+  phone: "+57 (312) 214-9562",
+  phoneHref: "+573122149562",
   cities: "Bogotá · Barranquilla · Medellín",
   address: "Calle 93 # 14-20, Oficina 502, Bogotá D.C.",
 };

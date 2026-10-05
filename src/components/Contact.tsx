@@ -14,30 +14,12 @@ export function Contact() {
     setSentSuccess(false);
 
     const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
     const nombre = String(form.get("name") || "");
     const correo = String(form.get("email") || "");
     const telefono = String(form.get("phone") || "");
     const area = String(form.get("area") || "");
     const caso = String(form.get("message") || "");
-
-    try {
-      const { error } = await supabase.from("contactos_web").insert({
-        nombre,
-        correo,
-        telefono,
-        area,
-        mensaje: caso,
-      });
-
-      if (error) {
-        console.warn("Error guardando en Supabase, abriendo WhatsApp:", error);
-      }
-    } catch (err) {
-      console.warn("Envío directo:", err);
-    }
-
-    setLoading(false);
-    setSentSuccess(true);
 
     const message = [
       "Hola, quiero solicitar una asesoría jurídica con J&A Legal.",
@@ -49,13 +31,30 @@ export function Contact() {
     ].join("\n");
 
     const whatsappNumber = firm.phoneHref.replace(/\D/g, "");
+    const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
 
-    window.open(
-      `https://wa.me/${573122149562}}?text=${encodeURIComponent(message)}`,
-      "_blank",
-    );
+    // Guardar en Supabase sin demorar la apertura de WhatsApp
+    try {
+      supabase.from("contactos_web").insert({
+        nombre,
+        correo,
+        telefono,
+        area,
+        mensaje: caso,
+      }).then(() => {}).catch(() => {});
+    } catch {
+      // Ignorar error secundario
+    }
 
-    event.currentTarget.reset();
+    setLoading(false);
+    setSentSuccess(true);
+    formElement.reset();
+
+    // Abrir WhatsApp en nueva pestaña o en la actual si el navegador bloquea popups
+    const win = window.open(whatsappUrl, "_blank");
+    if (!win || win.closed || typeof win.closed === "undefined") {
+      window.location.href = whatsappUrl;
+    }
   };
 
   return (
