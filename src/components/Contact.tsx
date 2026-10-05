@@ -51,7 +51,7 @@ export function Contact() {
     const whatsappNumber = firm.phoneHref.replace(/\D/g, "");
 
     window.open(
-      `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`,
+      `https://wa.me/${573122149562}}?text=${encodeURIComponent(message)}`,
       "_blank",
     );
 
