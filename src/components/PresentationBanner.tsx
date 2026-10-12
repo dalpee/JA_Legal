@@ -1,6 +1,7 @@
 import React from "react";
 import { Sliders, Sparkles, Printer, UserCheck, ShieldCheck } from "./icons";
 import { caseTemplates } from "../data/initialData";
+import { downloadWordDossier } from "../utils/downloadWordDossier";
 
 interface PresentationBannerProps {
   onOpenEditor: () => void;
@@ -173,6 +174,28 @@ export function PresentationBanner({
         >
           <Printer size={14} color="#d9b56a" />
           <span>Ficha</span>
+        </button>
+
+        {/* Word Dossier */}
+        <button
+          type="button"
+          onClick={downloadWordDossier}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "5px",
+            padding: "4px 10px",
+            fontSize: "0.75rem",
+            borderRadius: "3px",
+            background: "var(--ink-panel)",
+            border: "1px solid var(--brass)",
+            color: "var(--brass-light)",
+            cursor: "pointer",
+            fontWeight: 600,
+          }}
+          title="Descargar Dossier completo en formato Word (.doc)"
+        >
+          <span>📄 Dossier Word</span>
         </button>
 
         {/* Modify Case Button */}

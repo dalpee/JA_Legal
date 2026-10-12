@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { Navbar } from "./components/Navbar";
 import { Hero } from "./components/Hero";
+import { TrustBar } from "./components/TrustBar";
 import { About } from "./components/About";
 import { Services } from "./components/Services";
 import { Team } from "./components/Team";
+import { FAQ } from "./components/FAQ";
 import { Contact } from "./components/Contact";
 import { Footer } from "./components/Footer";
 import { FloatingWhatsApp } from "./components/FloatingWhatsApp";
@@ -27,7 +29,7 @@ export default function App() {
       const hash = window.location.hash.toLowerCase();
       if (hash === "#portal") {
         setCurrentView("portal");
-      } else if (hash === "#inicio" || hash === "#quienes-somos" || hash === "#servicios" || hash === "#equipo" || hash === "#contacto") {
+      } else if (hash === "#inicio" || hash === "#quienes-somos" || hash === "#servicios" || hash === "#equipo" || hash === "#faq" || hash === "#contacto") {
         setCurrentView("site");
       }
     };
@@ -57,9 +59,11 @@ export default function App() {
       <Navbar onOpenPortal={openPortal} />
       <main>
         <Hero />
+        <TrustBar />
         <About />
         <Services />
         <Team />
+        <FAQ />
         <Contact />
       </main>
       <Footer />
