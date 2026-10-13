@@ -15,9 +15,19 @@ import {
   saveStoredFinances,
   resetAllToDefault,
   isConfiguredWithRealSupabase,
+  getStoredCases,
+  saveStoredCases,
+  deleteStoredCase,
+  getStoredUsers,
+  syncCaseToDatabase,
+  deleteCaseFromDatabase,
+  fetchProfilesOrUsers,
+  type StoredUser,
 } from "../lib/supabaseClient";
 import { defaultProfile, firmProfile, caseTemplates } from "../data/initialData";
 import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem, FinancialRecord } from "../types/portal";
+import { CreateCaseModal } from "./CreateCaseModal";
+import { AdminDashboard } from "./AdminDashboard";
 import { CaseEditorDrawer } from "./CaseEditorDrawer";
 import { PresentationBanner } from "./PresentationBanner";
 import { DocumentModal } from "./DocumentModal";
@@ -59,6 +69,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [loadingAuth, setLoadingAuth] = useState(true);
 
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [allCases, setAllCases] = useState<CaseRecord[]>([]);
   const [caseRecord, setCaseRecord] = useState<CaseRecord | null>(null);
   const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -66,9 +77,19 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [finances, setFinances] = useState<FinancialRecord[]>([]);
   const [loadingData, setLoadingData] = useState(false);
 
+  // Modal para crear y editar procesos
+  const [isCreateCaseModalOpen, setIsCreateCaseModalOpen] = useState(false);
+  const [editingCase, setEditingCase] = useState<CaseRecord | null>(null);
+
+  // Estados para prellenar asignación de cliente y su ID
+  const [prefillClientId, setPrefillClientId] = useState("");
+  const [prefillClientEmail, setPrefillClientEmail] = useState("");
+  const [prefillClientName, setPrefillClientName] = useState("");
+  const [registeredUsersList, setRegisteredUsersList] = useState<StoredUser[]>([]);
+
   // Sección activa en el portal
   const [activeSection, setActiveSection] = useState<
-    "resumen" | "proceso" | "agenda" | "documentos" | "historial" | "economia" | "calculadora"
+    "resumen" | "proceso" | "agenda" | "documentos" | "historial" | "economia" | "calculadora" | "admin"
   >("resumen");
 
   // Estados de modales y herramientas
@@ -141,18 +162,36 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
       setProfile(activeProfile);
 
-      const { data: caseData } = await supabase
-        .from("cases")
-        .select("*")
-        .eq("client_id", session.user.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // Cargar lista de casos guardados (inicia vacía por defecto)
+      const storedCasesList = getStoredCases();
+      setAllCases(storedCasesList);
+
+      // Cargar perfiles de usuarios registrados (para asignación rápida en AdminDashboard)
+      const fetchedUsers = await fetchProfilesOrUsers();
+      if (!cancelled) {
+        setRegisteredUsersList(fetchedUsers);
+      }
+
+      let activeCase: CaseRecord | null = null;
+      if (userRole === "firm") {
+        // Los abogados ven todos los casos del despacho
+        activeCase = storedCasesList.length > 0 ? storedCasesList[0] : null;
+        if (!activeCase) {
+          setActiveSection("admin");
+        }
+      } else {
+        // El cliente SOLO ve el caso que le pertenece a él por correo o ID
+        const clientEmailLower = (session.user.email || "").toLowerCase();
+        activeCase = storedCasesList.find((c) =>
+          (c.client_email && c.client_email.toLowerCase() === clientEmailLower) ||
+          (c.client_id && c.client_id === session.user.id)
+        ) || null;
+      }
 
       if (cancelled) return;
-      setCaseRecord(caseData || getStoredCase());
+      setCaseRecord(activeCase);
 
-      const caseIdToUse = caseData?.id || "case_001_restitucion";
+      const caseIdToUse = activeCase?.id || "no_case";
 
       const [agendaRes, historyRes, docsRes, finRes] = await Promise.all([
         supabase.from("agenda_items").select("*").eq("case_id", caseIdToUse).order("event_date", { ascending: true }),
@@ -162,9 +201,9 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       ]);
 
       if (!cancelled) {
-        setAgenda(agendaRes.data && agendaRes.data.length > 0 ? agendaRes.data : getStoredAgenda());
-        setHistory(historyRes.data && historyRes.data.length > 0 ? historyRes.data : getStoredHistory());
-        setDocuments(docsRes.data && docsRes.data.length > 0 ? docsRes.data : getStoredDocuments());
+        setAgenda(agendaRes.data && agendaRes.data.length > 0 ? agendaRes.data : (activeCase ? getStoredAgenda() : []));
+        setHistory(historyRes.data && historyRes.data.length > 0 ? historyRes.data : (activeCase ? getStoredHistory() : []));
+        setDocuments(docsRes.data && docsRes.data.length > 0 ? docsRes.data : (activeCase ? getStoredDocuments() : []));
         setFinances(finRes.data && finRes.data.length > 0 ? finRes.data : getStoredFinances());
         setLoadingData(false);
       }
@@ -176,8 +215,31 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   }, [session]);
 
   const handleUpdateCase = (updated: CaseRecord) => {
-    setCaseRecord(updated);
     saveStoredCase(updated);
+    syncCaseToDatabase(updated);
+    const updatedList = getStoredCases();
+    setAllCases(updatedList);
+    setCaseRecord(updated);
+  };
+
+  const handleSaveOrUpdateCase = async (savedCase: CaseRecord) => {
+    saveStoredCase(savedCase);
+    await syncCaseToDatabase(savedCase);
+    const updatedList = getStoredCases();
+    setAllCases(updatedList);
+    setCaseRecord(savedCase);
+    setIsCreateCaseModalOpen(false);
+    setEditingCase(null);
+    setPrefillClientId("");
+    setPrefillClientEmail("");
+    setPrefillClientName("");
+  };
+
+  const handleDeleteCase = async (caseId: string) => {
+    await deleteCaseFromDatabase(caseId);
+    const updatedList = getStoredCases();
+    setAllCases(updatedList);
+    setCaseRecord(updatedList.length > 0 ? updatedList[0] : null);
   };
 
   const handleUpdateAgenda = (updated: AgendaItem[]) => {
@@ -309,7 +371,16 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       });
 
       if (error) {
-        setAuthError(error.message || "Credenciales incorrectas. Verifique su correo y contraseña.");
+        let msg = error.message;
+        const lower = msg.toLowerCase();
+        if (lower.includes("invalid login credentials")) {
+          msg = "Usuario no registrado o credenciales incorrectas. Verifique su correo o cree una cuenta nueva.";
+        } else if (lower.includes("email not confirmed")) {
+          msg = "Correo no confirmado en Supabase. En el panel de Supabase active la casilla 'Auto Confirm User'.";
+        } else if (lower.includes("invalid email")) {
+          msg = "El formato del correo electrónico ingresado no es válido.";
+        }
+        setAuthError(msg);
       } else if (data?.session) {
         setSession(data.session);
       }
@@ -468,6 +539,23 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
             </div>
 
             <nav className="portal-menu" aria-label="Portal de clientes">
+              {/* Pestaña: Panel Admin & Asignación de Casos (Solo Abogados) */}
+              {isFirm && (
+                <button
+                  type="button"
+                  className={activeSection === "admin" ? "active" : ""}
+                  onClick={() => setActiveSection("admin")}
+                  style={{
+                    borderLeft: activeSection === "admin" ? "3px solid var(--brass)" : "none",
+                    background: activeSection === "admin" ? "rgba(217, 181, 106, 0.18)" : "rgba(217, 181, 106, 0.05)",
+                    fontWeight: 700,
+                  }}
+                >
+                  <span>⚖️ Panel Admin & Clientes</span>
+                  <small style={{ color: "var(--brass-light)", fontWeight: 700 }}>{allCases.length} casos</small>
+                </button>
+              )}
+
               <button
                 type="button"
                 className={activeSection === "resumen" ? "active" : ""}
@@ -555,27 +643,82 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
                   Actualice etapas, radicación de memoriales y registre pagos de honorarios para su cliente.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setIsEditorOpen(true)}
-                  style={{
-                    padding: "8px 12px",
-                    background: "var(--brass)",
-                    color: "var(--ink)",
-                    fontWeight: 600,
-                    fontSize: "0.8rem",
-                    border: "none",
-                    borderRadius: "3px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <Sliders size={14} />
-                  <span>Modificar Variables</span>
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection("admin")}
+                    style={{
+                      padding: "8px 12px",
+                      background: activeSection === "admin" ? "rgba(217, 181, 106, 0.25)" : "transparent",
+                      color: "var(--brass-light)",
+                      border: "1px solid var(--brass)",
+                      fontWeight: 600,
+                      fontSize: "0.8rem",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <span>📊 Gestionar Todos los Casos</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingCase(null);
+                      setPrefillClientId("");
+                      setPrefillClientEmail("");
+                      setPrefillClientName("");
+                      setIsCreateCaseModalOpen(true);
+                    }}
+                    style={{
+                      padding: "8px 12px",
+                      background: "var(--brass)",
+                      color: "var(--ink)",
+                      fontWeight: 700,
+                      fontSize: "0.8rem",
+                      border: "none",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <span>+ Crear Caso & Asignar Cliente</span>
+                  </button>
+
+                  {caseRecord && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingCase(caseRecord);
+                        setIsCreateCaseModalOpen(true);
+                      }}
+                      style={{
+                        padding: "7px 12px",
+                        background: "transparent",
+                        border: "1px solid var(--brass)",
+                        color: "var(--brass-light)",
+                        fontWeight: 600,
+                        fontSize: "0.78rem",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <Sliders size={13} />
+                      <span>Editar Caso & Adelantos</span>
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
               <div
@@ -645,6 +788,35 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
           <section className="portal-content" id="resumen">
             {loadingData && <p className="portal-loading-inline">Cargando información procesal…</p>}
 
+            {/* SECCIÓN ADMIN: PANEL DE ADMINISTRACIÓN Y ASIGNACIÓN DE CASOS */}
+            {isFirm && activeSection === "admin" && (
+              <AdminDashboard
+                allCases={allCases}
+                onSelectCase={(selected) => {
+                  setCaseRecord(selected);
+                  setActiveSection("resumen");
+                }}
+                onCreateNewCase={(prefillId, prefillEmail, prefillName) => {
+                  setEditingCase(null);
+                  setPrefillClientId(prefillId || "");
+                  setPrefillClientEmail(prefillEmail || "");
+                  setPrefillClientName(prefillName || "");
+                  setIsCreateCaseModalOpen(true);
+                }}
+                onEditCase={(c) => {
+                  setEditingCase(c);
+                  setIsCreateCaseModalOpen(true);
+                }}
+                onDeleteCase={(id) => {
+                  handleDeleteCase(id);
+                }}
+                registeredUsers={registeredUsersList.length > 0 ? registeredUsersList : getStoredUsers()}
+                onNavigateToSection={(sec) => {
+                  setActiveSection(sec);
+                }}
+              />
+            )}
+
             {/* SECCIÓN NUEVA: ECONOMÍA & HONORARIOS */}
             {activeSection === "economia" && (
               <FinanceSection
@@ -661,25 +833,188 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               <LegalCalculator onApplyToCase={handleApplyLiquidationToCase} />
             )}
 
-            {!loadingData && !caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && (
-              <div className="portal-empty">
-                <h2>Aún no hay un proceso asociado a su cuenta</h2>
-                <p>En cuanto la firma registre su caso, aparecerá aquí automáticamente.</p>
-                {isFirm && (
-                  <button
-                    type="button"
-                    onClick={() => handleLoadTemplate("tpl_civil_restitucion")}
+            {!loadingData && !caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && (
+              <div className="portal-empty" style={{ textAlign: "center", padding: "48px 24px" }}>
+                <span style={{ fontSize: "2.8rem", display: "block", marginBottom: "14px" }}>
+                  {isFirm ? "⚖️" : "📂"}
+                </span>
+                <h2 style={{ fontSize: "1.35rem", color: "var(--text-bright)", marginBottom: "10px" }}>
+                  {isFirm
+                    ? "No hay procesos registrados en el despacho aún"
+                    : "No tiene procesos judiciales asignados por el momento"}
+                </h2>
+                <p style={{ maxWidth: "560px", margin: "0 auto 24px", color: "var(--text-muted)", fontSize: "0.88rem", lineHeight: 1.6 }}>
+                  {isFirm
+                    ? "Como abogado titular, puede ir agregando los expedientes poco a poco, asignándolos al correo del cliente correspondiente y actualizando sus adelantos para que solo él pueda verlos."
+                    : `Bienvenido(a), ${profile?.full_name}. Actualmente no tiene procesos judiciales activos asignados a su cuenta (${session?.user?.email || profile?.email}). En cuanto su abogado titular registre su expediente, podrá consultar aquí los adelantos, las audiencias y los documentos oficiales.`}
+                </p>
+                {isFirm ? (
+                  <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingCase(null);
+                        setPrefillClientId("");
+                        setPrefillClientEmail("");
+                        setPrefillClientName("");
+                        setIsCreateCaseModalOpen(true);
+                      }}
+                      className="btn primary"
+                      style={{ padding: "12px 24px", fontSize: "0.88rem", fontWeight: 700 }}
+                    >
+                      + Crear Primer Proceso / Caso
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSection("admin")}
+                      className="btn secondary"
+                      style={{ padding: "12px 24px", fontSize: "0.88rem", fontWeight: 700, border: "1px solid var(--brass)", color: "var(--brass-light)" }}
+                    >
+                      Ver Panel de Clientes Registrados
+                    </button>
+                  </div>
+                ) : (
+                  <a
+                    href="https://wa.me/573122149562?text=Hola%2C%20quisiera%20consultar%20el%20estado%20de%20mi%20caso"
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="btn primary"
-                    style={{ marginTop: "16px" }}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "8px", textDecoration: "none", padding: "10px 22px" }}
                   >
-                    Cargar Caso de Prueba
-                  </button>
+                    <span>💬 Contactar al Despacho (WhatsApp)</span>
+                  </a>
                 )}
               </div>
             )}
 
-            {caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && (
+            {caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && (
               <>
+                {/* BARRA DE GESTIÓN MULTI-CASO PARA ABOGADOS */}
+                {isFirm && (
+                  <div
+                    style={{
+                      background: "var(--ink-soft)",
+                      border: "1px solid var(--brass)",
+                      borderRadius: "6px",
+                      padding: "12px 18px",
+                      marginBottom: "20px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: "12px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "0.82rem", color: "var(--brass)", fontWeight: 700 }}>
+                        📂 Expediente ({allCases.findIndex((c) => c.id === caseRecord.id) + 1} de {allCases.length}):
+                      </span>
+                      <select
+                        value={caseRecord.id}
+                        onChange={(e) => {
+                          const selected = allCases.find((c) => c.id === e.target.value);
+                          if (selected) setCaseRecord(selected);
+                        }}
+                        style={{
+                          background: "var(--parchment-deep)",
+                          color: "var(--text-bright)",
+                          border: "1px solid var(--line)",
+                          padding: "6px 12px",
+                          borderRadius: "4px",
+                          fontSize: "0.82rem",
+                          fontWeight: 600,
+                          maxWidth: "320px",
+                        }}
+                      >
+                        {allCases.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.title} — {c.client_name || c.client_email}
+                          </option>
+                        ))}
+                      </select>
+
+                      {caseRecord.client_email && (
+                        <span
+                          style={{
+                            fontSize: "0.72rem",
+                            background: "rgba(56, 189, 248, 0.12)",
+                            color: "#38bdf8",
+                            padding: "4px 8px",
+                            borderRadius: "3px",
+                            border: "1px solid rgba(56, 189, 248, 0.3)",
+                          }}
+                          title="Solo este cliente puede ver este caso al iniciar sesión"
+                        >
+                          👤 Asignado a: <strong>{caseRecord.client_email}</strong>
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingCase(caseRecord);
+                          setIsCreateCaseModalOpen(true);
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          background: "transparent",
+                          border: "1px solid var(--brass)",
+                          color: "var(--brass-light)",
+                          borderRadius: "4px",
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        ✏️ Editar Caso & Adelantos
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingCase(null);
+                          setIsCreateCaseModalOpen(true);
+                        }}
+                        style={{
+                          padding: "6px 14px",
+                          background: "var(--brass)",
+                          color: "var(--ink)",
+                          border: "none",
+                          borderRadius: "4px",
+                          fontSize: "0.78rem",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        + Nuevo Caso
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(`¿Está seguro de eliminar el proceso "${caseRecord.title}"?`)) {
+                            handleDeleteCase(caseRecord.id);
+                          }
+                        }}
+                        style={{
+                          padding: "6px 10px",
+                          background: "transparent",
+                          border: "1px solid #ef4444",
+                          color: "#f87171",
+                          borderRadius: "4px",
+                          fontSize: "0.78rem",
+                          cursor: "pointer",
+                        }}
+                        title="Eliminar este proceso"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="content-header">
                   <div>
                     <p className="kicker">
@@ -1003,34 +1338,56 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
           </section>
         </div>
 
-        {/* Drawer modificador de caso (solo firma) */}
-        <CaseEditorDrawer
-          isOpen={isEditorOpen}
-          onClose={() => setIsEditorOpen(false)}
-          caseRecord={caseRecord || getStoredCase()}
-          onUpdateCase={handleUpdateCase}
-          agenda={agenda}
-          onUpdateAgenda={handleUpdateAgenda}
-          history={history}
-          onUpdateHistory={handleUpdateHistory}
-          documents={documents}
-          onUpdateDocuments={handleUpdateDocuments}
-          profile={profile}
-          onUpdateProfile={handleUpdateProfile}
-          onResetDefaults={handleResetDefaults}
-          onLoadTemplate={handleLoadTemplate}
-          onEnterPresentationMode={() => {
-            setIsEditorOpen(false);
-            setIsPresentationMode(true);
+        {/* Modal para Crear y Editar Proceso con asignación de cliente y adelantos */}
+        <CreateCaseModal
+          isOpen={isCreateCaseModalOpen}
+          onClose={() => {
+            setIsCreateCaseModalOpen(false);
+            setEditingCase(null);
+            setPrefillClientId("");
+            setPrefillClientEmail("");
+            setPrefillClientName("");
           }}
+          onSaveCase={handleSaveOrUpdateCase}
+          existingCase={editingCase}
+          registeredUsers={registeredUsersList.length > 0 ? registeredUsersList : getStoredUsers()}
+          prefilledClientId={prefillClientId}
+          prefilledClientEmail={prefillClientEmail}
+          prefilledClientName={prefillClientName}
         />
 
+        {/* Drawer modificador de caso (solo firma) */}
+        {caseRecord && (
+          <CaseEditorDrawer
+            isOpen={isEditorOpen}
+            onClose={() => setIsEditorOpen(false)}
+            caseRecord={caseRecord}
+            onUpdateCase={handleUpdateCase}
+            agenda={agenda}
+            onUpdateAgenda={handleUpdateAgenda}
+            history={history}
+            onUpdateHistory={handleUpdateHistory}
+            documents={documents}
+            onUpdateDocuments={handleUpdateDocuments}
+            profile={profile}
+            onUpdateProfile={handleUpdateProfile}
+            onResetDefaults={handleResetDefaults}
+            onLoadTemplate={handleLoadTemplate}
+            onEnterPresentationMode={() => {
+              setIsEditorOpen(false);
+              setIsPresentationMode(true);
+            }}
+          />
+        )}
+
         {/* Modal de Documentos */}
-        <DocumentModal
-          document={selectedDocForPreview}
-          caseRecord={caseRecord || getStoredCase()}
-          onClose={() => setSelectedDocForPreview(null)}
-        />
+        {caseRecord && (
+          <DocumentModal
+            document={selectedDocForPreview}
+            caseRecord={caseRecord}
+            onClose={() => setSelectedDocForPreview(null)}
+          />
+        )}
 
         {/* Modal de Arquitectura del Software (Ingeniería de Sistemas) */}
         <SystemArchitectureModal

@@ -29,6 +29,9 @@ export type DocumentItem = {
 export type CaseRecord = {
   id: string;
   client_id: string;
+  client_email?: string;
+  client_name?: string;
+  radicado?: string;
   title: string;
   process_type: string;
   status: string;

@@ -96,23 +96,110 @@ export function saveStoredFinances(data: FinancialRecord[]) {
   }
 }
 
-// Helpers para caso, agenda, historial y documentos
-export function getStoredCase(): CaseRecord {
+const STORAGE_CASES_LIST_KEY = "ja_legal_cases_list";
+
+export function getStoredCases(): CaseRecord[] {
   try {
-    const raw = localStorage.getItem(STORAGE_CASE_KEY);
+    const raw = localStorage.getItem(STORAGE_CASES_LIST_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) {
-    console.warn("Error reading stored case", e);
+    console.warn("Error reading stored cases", e);
   }
-  return defaultCaseRecord;
+  // Comienza vacío por el momento como solicitó el usuario!
+  return [];
+}
+
+export function saveStoredCases(data: CaseRecord[]) {
+  try {
+    localStorage.setItem(STORAGE_CASES_LIST_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.warn("Error saving cases", e);
+  }
+}
+
+export function getStoredCase(): CaseRecord | null {
+  const cases = getStoredCases();
+  return cases.length > 0 ? cases[0] : null;
 }
 
 export function saveStoredCase(data: CaseRecord) {
-  try {
-    localStorage.setItem(STORAGE_CASE_KEY, JSON.stringify(data));
-  } catch (e) {
-    console.warn("Error saving case", e);
+  const cases = getStoredCases();
+  const index = cases.findIndex((c) => c.id === data.id);
+  let updated: CaseRecord[];
+  if (index >= 0) {
+    updated = cases.map((c) => (c.id === data.id ? data : c));
+  } else {
+    updated = [data, ...cases];
   }
+  saveStoredCases(updated);
+}
+
+export function deleteStoredCase(caseId: string) {
+  const cases = getStoredCases();
+  const updated = cases.filter((c) => c.id !== caseId);
+  saveStoredCases(updated);
+}
+
+// Sincroniza el caso con la base de datos de Supabase si está conectada
+export async function syncCaseToDatabase(caseRecord: CaseRecord) {
+  saveStoredCase(caseRecord);
+  if (isConfiguredWithRealSupabase) {
+    try {
+      await supabase.from("cases").upsert({
+        id: caseRecord.id,
+        client_id: caseRecord.client_id,
+        title: caseRecord.title,
+        process_type: caseRecord.process_type,
+        status: caseRecord.status,
+        progress: caseRecord.progress,
+        balance: caseRecord.balance,
+        total_fees: caseRecord.total_fees,
+        authority: caseRecord.authority,
+        city: caseRecord.city || "Bogotá D.C.",
+        lawyer: caseRecord.lawyer,
+        observations: caseRecord.observations,
+        current_phase: caseRecord.current_phase,
+      });
+    } catch (e) {
+      console.warn("Error syncing case to Supabase", e);
+    }
+  }
+}
+
+// Elimina el caso de Supabase y de local storage
+export async function deleteCaseFromDatabase(caseId: string) {
+  deleteStoredCase(caseId);
+  if (isConfiguredWithRealSupabase) {
+    try {
+      await supabase.from("cases").delete().eq("id", caseId);
+    } catch (e) {
+      console.warn("Error deleting case from Supabase", e);
+    }
+  }
+}
+
+// Obtiene los perfiles de Supabase o los usuarios registrados locales
+export async function fetchProfilesOrUsers(): Promise<StoredUser[]> {
+  if (isConfiguredWithRealSupabase) {
+    try {
+      const { data, error } = await supabase.from("profiles").select("*");
+      if (!error && data && data.length > 0) {
+        return data.map((p: any) => ({
+          id: p.id,
+          email: p.email || "",
+          full_name: p.full_name,
+          initials: p.full_name ? p.full_name.slice(0, 2).toUpperCase() : "US",
+          role: p.role || "client",
+          id_number: p.id_number,
+          phone: p.phone,
+          password: "",
+        }));
+      }
+    } catch (e) {
+      console.warn("Could not fetch profiles from Supabase, falling back to local users", e);
+    }
+  }
+  return getStoredUsers();
 }
 
 export function getStoredAgenda(): AgendaItem[] {
@@ -245,14 +332,14 @@ const mockSupabase = {
       if (!found) {
         return {
           data: { session: null, user: null },
-          error: { message: "No existe una cuenta con este correo electrónico. Verifique los datos o regístrese." },
+          error: { message: "Usuario no registrado en el sistema. Verifique su correo o cree una cuenta en la pestaña 'Crear Cuenta'." },
         };
       }
 
       if (password && found.password && found.password !== password) {
         return {
           data: { session: null, user: null },
-          error: { message: "Contraseña incorrecta. Por favor intente nuevamente." },
+          error: { message: "Contraseña incorrecta. Por favor verifique e intente nuevamente." },
         };
       }
 

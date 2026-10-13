@@ -17,7 +17,8 @@ export function Footer() {
                 onClick={downloadWordDossier}
                 style={{
                   background: "transparent",
-                  border: "1px solid var(--brass)",
+                  border: "1px solid #5f4e29",
+                  borderColor: "#5f4e29",
                   color: "var(--brass-light)",
                   padding: "6px 12px",
                   borderRadius: "3px",
