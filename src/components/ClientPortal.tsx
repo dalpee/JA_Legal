@@ -101,7 +101,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [selectedDocForPreview, setSelectedDocForPreview] = useState<DocumentItem | null>(null);
 
   // Estados de Autenticación Real
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authMode, setAuthMode] = useState<"login" | "register" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [regFullName, setRegFullName] = useState("");
@@ -450,6 +450,41 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       }
     } catch (err: any) {
       setAuthError(err.message || "Error al registrar el usuario.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Recuperación / Restablecimiento de Contraseña
+  async function handleResetPassword(event: FormEvent) {
+    event.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+
+    if (!email.trim()) {
+      setAuthError("Por favor ingrese su correo electrónico registrado.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      if (error) {
+        setAuthError(error.message || "No se pudo procesar la solicitud de recuperación.");
+      } else {
+        const isDavid = email.trim().toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+        if (isDavid && !isConfiguredWithRealSupabase) {
+          setAuthSuccess(
+            "🔑 Clave del Super Admin en modo local: 'Admin2026*'. También puedes ingresar directamente a la pestaña 'Crear Cuenta' o cambiarla cuando quieras."
+          );
+        } else {
+          setAuthSuccess(
+            `Se ha procesado la solicitud para ${email.trim()}. Si tu proyecto de Supabase tiene SMTP configurado, revisa tu bandeja de entrada o actualiza la contraseña directamente.`
+          );
+        }
+      }
+    } catch (err: any) {
+      setAuthError(err.message || "Error al intentar restablecer la contraseña.");
     } finally {
       setSubmitting(false);
     }
@@ -1441,7 +1476,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
             : "Complete sus datos para habilitar su acceso al sistema de seguimiento procesal."}
         </p>
 
-        {/* Pestañas: Iniciar Sesión vs Registrarse */}
+        {/* Pestañas: Iniciar Sesión vs Registrarse vs Recuperar */}
         <div className="auth-nav-tabs">
           <button
             type="button"
@@ -1449,6 +1484,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
             onClick={() => {
               setAuthMode("login");
               setAuthError(null);
+              setAuthSuccess(null);
             }}
           >
             Iniciar Sesión
@@ -1459,16 +1495,28 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
             onClick={() => {
               setAuthMode("register");
               setAuthError(null);
+              setAuthSuccess(null);
             }}
           >
             Crear Cuenta
+          </button>
+          <button
+            type="button"
+            className={`auth-nav-tab ${authMode === "reset" ? "active" : ""}`}
+            onClick={() => {
+              setAuthMode("reset");
+              setAuthError(null);
+              setAuthSuccess(null);
+            }}
+          >
+            Recuperar Clave
           </button>
         </div>
 
         {authSuccess && <p className="auth-success-msg">{authSuccess}</p>}
         {authError && <p className="portal-form-error">{authError}</p>}
 
-        {authMode === "login" ? (
+        {authMode === "login" && (
           /* FORMULARIO DE INICIO DE SESIÓN */
           <form className="portal-form" onSubmit={handleLogin}>
             <label>
@@ -1477,13 +1525,34 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="ejemplo@jalegal.com.co"
+                placeholder="eldavidprz@gmail.com"
                 required
               />
             </label>
 
             <label>
-              Contraseña
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Contraseña</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("reset");
+                    setAuthError(null);
+                    setAuthSuccess(null);
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--brass)",
+                    fontSize: "0.74rem",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                    padding: 0,
+                  }}
+                >
+                  ¿Olvidó su contraseña?
+                </button>
+              </div>
               <input
                 type="password"
                 value={password}
@@ -1497,7 +1566,9 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               {submitting ? "Verificando…" : "Ingresar al portal"}
             </button>
           </form>
-        ) : (
+        )}
+
+        {authMode === "register" && (
           /* FORMULARIO DE REGISTRO CON SELECCIÓN DE ROL */
           <form className="portal-form" onSubmit={handleRegister}>
             <label>
@@ -1506,7 +1577,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 type="text"
                 value={regFullName}
                 onChange={(e) => setRegFullName(e.target.value)}
-                placeholder="Dr. Nombre Apellido"
+                placeholder="David Pérez"
                 required
               />
             </label>
@@ -1529,7 +1600,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 type="text"
                 value={regIdNumber}
                 onChange={(e) => setRegIdNumber(e.target.value)}
-                placeholder={regRole === "firm" ? "T.P. 182.904 C.S.J." : "C.C. 1.020.340.550"}
+                placeholder={regRole === "firm" ? "Super Admin Titular" : "C.C. 1.020.340.550"}
               />
             </label>
 
@@ -1539,7 +1610,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="correo@ejemplo.com"
+                placeholder="eldavidprz@gmail.com"
                 required
               />
             </label>
@@ -1557,6 +1628,39 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
             <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "8px" }}>
               {submitting ? "Creando cuenta…" : "Registrar y Acceder"}
+            </button>
+          </form>
+        )}
+
+        {authMode === "reset" && (
+          /* FORMULARIO DE RECUPERACIÓN DE CONTRASEÑA */
+          <form className="portal-form" onSubmit={handleResetPassword}>
+            <label>
+              Correo electrónico registrado *
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="eldavidprz@gmail.com"
+                required
+              />
+            </label>
+
+            <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "8px" }}>
+              {submitting ? "Verificando…" : "Recuperar / Consultar Clave"}
+            </button>
+
+            <button
+              type="button"
+              className="btn text"
+              onClick={() => {
+                setAuthMode("login");
+                setAuthError(null);
+                setAuthSuccess(null);
+              }}
+              style={{ marginTop: "6px", fontSize: "0.8rem", color: "var(--text-muted)" }}
+            >
+              ← Volver al inicio de sesión
             </button>
           </form>
         )}
@@ -1582,26 +1686,58 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 {isConfiguredWithRealSupabase ? "Base de Datos Supabase: Conectada" : "Modo Autónomo Local Activo"}
               </strong>
               <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>
-                {isConfiguredWithRealSupabase ? "Conexión a la nube PostgreSQL verificada" : "Usando almacenamiento seguro local (.env opcional)"}
+                {isConfiguredWithRealSupabase ? "Conexión a la nube PostgreSQL verificada" : "Almacenamiento local seguro activo"}
               </span>
             </div>
           </div>
 
           <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "8px" }}>
             <div style={{ background: "rgba(217, 181, 106, 0.1)", border: "1px solid var(--brass)", padding: "10px 12px", borderRadius: "6px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "3px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                 <strong style={{ color: "var(--brass)", fontSize: "0.76rem" }}>
-                  👑 Super Admin Titular:
+                  👑 Credenciales Super Admin:
                 </strong>
                 <span style={{ fontSize: "0.68rem", color: "#4ade80", background: "rgba(34, 197, 94, 0.12)", padding: "1px 6px", borderRadius: "4px" }}>
                   Acceso Total
                 </span>
               </div>
-              <code style={{ color: "var(--text-bright)", fontSize: "0.8rem", display: "block" }}>
-                {SUPER_ADMIN_EMAIL}
-              </code>
-              <span style={{ display: "block", color: "var(--text-muted)", fontSize: "0.68rem", marginTop: "3px" }}>
-                Inicie sesión o regístrese con este correo para gestionar el despacho, crear procesos y asignar clientes.
+              <div style={{ display: "flex", flexDirection: "column", gap: "2px", margin: "4px 0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Correo:</span>
+                  <code style={{ color: "var(--text-bright)", fontSize: "0.78rem" }}>{SUPER_ADMIN_EMAIL}</code>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Clave asignada:</span>
+                  <code style={{ color: "#facc15", fontWeight: "bold", fontSize: "0.82rem" }}>Admin2026*</code>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail(SUPER_ADMIN_EMAIL);
+                    setPassword("Admin2026*");
+                    setAuthMode("login");
+                    setAuthError(null);
+                    setAuthSuccess(null);
+                  }}
+                  style={{
+                    background: "var(--brass)",
+                    color: "var(--ink)",
+                    border: "none",
+                    borderRadius: "4px",
+                    padding: "4px 8px",
+                    fontSize: "0.7rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    width: "100%",
+                  }}
+                >
+                  ⚡ Autocompletar y Probar Acceso
+                </button>
+              </div>
+              <span style={{ display: "block", color: "var(--text-muted)", fontSize: "0.66rem", marginTop: "5px" }}>
+                Si deseas usar otra clave, ve a la pestaña <strong>&quot;Crear Cuenta&quot;</strong> o regístrate con tu contraseña preferida; el sistema reconocerá tu correo y te otorgará los permisos de Super Admin de inmediato.
               </span>
             </div>
 

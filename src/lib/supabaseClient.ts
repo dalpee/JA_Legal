@@ -605,6 +605,37 @@ const mockSupabase = {
       notifyAuthChange("SIGNED_IN", session);
       return { data: { session, user: session.user }, error: null };
     },
+    async resetPasswordForEmail(email: string) {
+      await new Promise((res) => setTimeout(res, 250));
+      const cleanEmail = email.trim().toLowerCase();
+      const users = getStoredUsers();
+      const found = users.find((u) => u.email.toLowerCase() === cleanEmail);
+      if (!found && cleanEmail !== SUPER_ADMIN_EMAIL.toLowerCase()) {
+        return {
+          data: null,
+          error: { message: "No existe una cuenta registrada con este correo electrónico." },
+        };
+      }
+      return { data: {}, error: null };
+    },
+    async updateUser(attributes: { password?: string; data?: any }) {
+      await new Promise((res) => setTimeout(res, 200));
+      if (currentMockSession?.user) {
+        const users = getStoredUsers();
+        const updated = users.map((u) => {
+          if (u.id === currentMockSession?.user.id || u.email.toLowerCase() === currentMockSession?.user.email?.toLowerCase()) {
+            return {
+              ...u,
+              password: attributes.password || u.password,
+              full_name: attributes.data?.full_name || u.full_name,
+            };
+          }
+          return u;
+        });
+        localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(updated));
+      }
+      return { data: { user: currentMockSession?.user }, error: null };
+    },
     async signOut() {
       notifyAuthChange("SIGNED_OUT", null);
       return { error: null };
