@@ -22,6 +22,8 @@ import {
   syncCaseToDatabase,
   deleteCaseFromDatabase,
   fetchProfilesOrUsers,
+  fetchAllCasesFromDatabase,
+  SUPER_ADMIN_EMAIL,
   type StoredUser,
 } from "../lib/supabaseClient";
 import { defaultProfile, firmProfile, caseTemplates } from "../data/initialData";
@@ -146,9 +148,11 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
       if (cancelled) return;
 
-      const userRole = session.user.user_metadata?.role || profileData?.role || "client";
-      const userName = session.user.user_metadata?.full_name || profileData?.full_name || (userRole === "firm" ? "Dra. Carolina Jiménez Ariza" : "Dr. Roberto Mendoza Vargas");
-      const initials = userName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || "JA";
+      const isSuperAdmin = (session.user.email || "").toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+      const userRole = isSuperAdmin ? "firm" : (session.user.user_metadata?.role || profileData?.role || "client");
+      const defaultName = isSuperAdmin ? "David Pérez" : (userRole === "firm" ? "David Pérez" : "Cliente Titular");
+      const userName = session.user.user_metadata?.full_name || profileData?.full_name || defaultName;
+      const initials = userName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || (isSuperAdmin ? "DP" : "JA");
 
       const activeProfile: Profile = {
         id: session.user.id,
@@ -156,15 +160,17 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
         initials,
         role: userRole,
         email: session.user.email,
-        id_number: session.user.user_metadata?.id_number || (userRole === "firm" ? "T.P. 182.904 C.S.J." : "C.C. 79.432.891"),
+        id_number: session.user.user_metadata?.id_number || (isSuperAdmin ? "Super Admin Titular" : (userRole === "firm" ? "Abogado Titular" : "C.C. Registrada")),
         phone: session.user.user_metadata?.phone || "",
       };
 
       setProfile(activeProfile);
 
-      // Cargar lista de casos guardados (inicia vacía por defecto)
-      const storedCasesList = getStoredCases();
-      setAllCases(storedCasesList);
+      // Cargar lista de casos guardados (desde Supabase si está conectado, o local)
+      const storedCasesList = await fetchAllCasesFromDatabase();
+      if (!cancelled) {
+        setAllCases(storedCasesList);
+      }
 
       // Cargar perfiles de usuarios registrados (para asignación rápida en AdminDashboard)
       const fetchedUsers = await fetchProfilesOrUsers();
@@ -214,10 +220,20 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     };
   }, [session]);
 
-  const handleUpdateCase = (updated: CaseRecord) => {
+  const refreshUsersList = async () => {
+    const fetched = await fetchProfilesOrUsers();
+    setRegisteredUsersList(fetched);
+  };
+
+  const refreshCasesList = async () => {
+    const cases = await fetchAllCasesFromDatabase();
+    setAllCases(cases);
+  };
+
+  const handleUpdateCase = async (updated: CaseRecord) => {
     saveStoredCase(updated);
-    syncCaseToDatabase(updated);
-    const updatedList = getStoredCases();
+    await syncCaseToDatabase(updated);
+    const updatedList = await fetchAllCasesFromDatabase();
     setAllCases(updatedList);
     setCaseRecord(updated);
   };
@@ -225,7 +241,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const handleSaveOrUpdateCase = async (savedCase: CaseRecord) => {
     saveStoredCase(savedCase);
     await syncCaseToDatabase(savedCase);
-    const updatedList = getStoredCases();
+    const updatedList = await fetchAllCasesFromDatabase();
     setAllCases(updatedList);
     setCaseRecord(savedCase);
     setIsCreateCaseModalOpen(false);
@@ -237,7 +253,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
   const handleDeleteCase = async (caseId: string) => {
     await deleteCaseFromDatabase(caseId);
-    const updatedList = getStoredCases();
+    const updatedList = await fetchAllCasesFromDatabase();
     setAllCases(updatedList);
     setCaseRecord(updatedList.length > 0 ? updatedList[0] : null);
   };
@@ -814,6 +830,8 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 onNavigateToSection={(sec) => {
                   setActiveSection(sec);
                 }}
+                onRefreshUsers={refreshUsersList}
+                onRefreshCases={refreshCasesList}
               />
             )}
 
@@ -1569,15 +1587,47 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
             </div>
           </div>
 
-          <p style={{ margin: "0 0 6px", fontSize: "0.72rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
-            Cuentas habilitadas por defecto:
-          </p>
-          <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "4px" }}>
-            <div>
-              <strong style={{ color: "var(--brass)" }}>Abogado:</strong> <code>abogado@jalegal.com.co</code> / Clave: <code>Abogado2026*</code>
+          <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "8px" }}>
+            <div style={{ background: "rgba(217, 181, 106, 0.1)", border: "1px solid var(--brass)", padding: "10px 12px", borderRadius: "6px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "3px" }}>
+                <strong style={{ color: "var(--brass)", fontSize: "0.76rem" }}>
+                  👑 Super Admin Titular:
+                </strong>
+                <span style={{ fontSize: "0.68rem", color: "#4ade80", background: "rgba(34, 197, 94, 0.12)", padding: "1px 6px", borderRadius: "4px" }}>
+                  Acceso Total
+                </span>
+              </div>
+              <code style={{ color: "var(--text-bright)", fontSize: "0.8rem", display: "block" }}>
+                {SUPER_ADMIN_EMAIL}
+              </code>
+              <span style={{ display: "block", color: "var(--text-muted)", fontSize: "0.68rem", marginTop: "3px" }}>
+                Inicie sesión o regístrese con este correo para gestionar el despacho, crear procesos y asignar clientes.
+              </span>
             </div>
-            <div>
-              <strong style={{ color: "#38bdf8" }}>Cliente:</strong> <code>cliente@jalegal.com.co</code> / Clave: <code>Cliente2026*</code>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "2px" }}>
+              <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>
+                ¿Cuentas demo anteriores?
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  resetAllToDefault();
+                  window.location.reload();
+                }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-muted)",
+                  fontSize: "0.68rem",
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                  padding: 0,
+                }}
+                title="Elimina usuarios y casos de prueba antiguos para empezar limpio"
+              >
+                Eliminar cuentas demo y purgar caché
+              </button>
             </div>
           </div>
         </div>

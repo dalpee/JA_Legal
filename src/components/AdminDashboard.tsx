@@ -1,6 +1,16 @@
 import { useState, useMemo } from "react";
 import { CaseRecord } from "../types/portal";
-import { StoredUser } from "../lib/supabaseClient";
+import {
+  StoredUser,
+  SUPER_ADMIN_EMAIL,
+  createUserAccount,
+  deleteUserAccount,
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  clearSupabaseConfig,
+  testSupabaseConnection,
+  SUPABASE_SQL_SETUP_SCRIPT,
+} from "../lib/supabaseClient";
 
 interface AdminDashboardProps {
   allCases: CaseRecord[];
@@ -10,6 +20,8 @@ interface AdminDashboardProps {
   onDeleteCase: (caseId: string) => void;
   registeredUsers: StoredUser[];
   onNavigateToSection: (section: "resumen" | "proceso" | "agenda" | "documentos" | "historial" | "economia") => void;
+  onRefreshUsers?: () => void;
+  onRefreshCases?: () => void;
 }
 
 export function AdminDashboard({
@@ -20,13 +32,34 @@ export function AdminDashboard({
   onDeleteCase,
   registeredUsers,
   onNavigateToSection,
+  onRefreshUsers,
+  onRefreshCases,
 }: AdminDashboardProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchField, setSearchField] = useState<"all" | "client_name" | "client_id">("all");
   const [selectedBranchFilter, setSelectedBranchFilter] = useState("all");
-  const [activeTab, setActiveTab] = useState<"casos" | "clientes">("casos");
+  const [activeTab, setActiveTab] = useState<"casos" | "clientes" | "conexion_supabase">("casos");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  // Estados para crear un nuevo usuario desde el AdminDashboard
+  const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("Cliente2026*");
+  const [newFullName, setNewFullName] = useState("");
+  const [newRole, setNewRole] = useState<"client" | "firm">("client");
+  const [newIdNumber, setNewIdNumber] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [userCreationLoading, setUserCreationLoading] = useState(false);
+  const [userCreationFeedback, setUserCreationFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Estados de configuración de Supabase
+  const currentCfg = getSupabaseConfig();
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState(currentCfg.url);
+  const [supabaseKeyInput, setSupabaseKeyInput] = useState(currentCfg.anonKey);
+  const [connectionTesting, setConnectionTesting] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<{ tested: boolean; success: boolean; message: string } | null>(null);
 
   // Copiar ID de usuario al portapapeles
   const handleCopyId = (id: string) => {
@@ -35,12 +68,105 @@ export function AdminDashboard({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  // Copiar script SQL al portapapeles
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(SUPABASE_SQL_SETUP_SCRIPT);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2500);
+  };
+
+  // Probar y guardar conexión a Supabase
+  const handleSaveAndTestSupabase = async () => {
+    setConnectionTesting(true);
+    setConnectionStatus(null);
+    try {
+      saveSupabaseConfig(supabaseUrlInput, supabaseKeyInput);
+      const testResult = await testSupabaseConnection(supabaseUrlInput, supabaseKeyInput);
+      setConnectionStatus({
+        tested: true,
+        success: testResult.success,
+        message: testResult.message,
+      });
+      if (testResult.success) {
+        if (onRefreshUsers) onRefreshUsers();
+        if (onRefreshCases) onRefreshCases();
+      }
+    } catch (e: any) {
+      setConnectionStatus({
+        tested: true,
+        success: false,
+        message: e.message || "Error al verificar conexión",
+      });
+    } finally {
+      setConnectionTesting(false);
+    }
+  };
+
+  // Manejar creación de nuevo usuario
+  const handleCreateUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUserCreationFeedback(null);
+    if (!newEmail.trim() || !newFullName.trim()) {
+      setUserCreationFeedback({ type: "error", text: "El correo y el nombre completo son obligatorios." });
+      return;
+    }
+
+    setUserCreationLoading(true);
+    try {
+      const res = await createUserAccount({
+        email: newEmail.trim(),
+        password: newPassword,
+        full_name: newFullName.trim(),
+        role: newRole,
+        id_number: newIdNumber.trim(),
+        phone: newPhone.trim(),
+      });
+
+      if (res.success) {
+        setUserCreationFeedback({
+          type: "success",
+          text: `Usuario ${newFullName} (${newEmail}) creado exitosamente con rol ${newRole === "firm" ? "Abogado" : "Cliente"}.`,
+        });
+        setNewEmail("");
+        setNewFullName("");
+        setNewIdNumber("");
+        setNewPhone("");
+        setNewPassword("Cliente2026*");
+        if (onRefreshUsers) onRefreshUsers();
+      } else {
+        setUserCreationFeedback({ type: "error", text: res.message || "No se pudo crear el usuario." });
+      }
+    } catch (err: any) {
+      setUserCreationFeedback({ type: "error", text: err.message || "Error al crear el usuario." });
+    } finally {
+      setUserCreationLoading(false);
+    }
+  };
+
+  // Eliminar usuario
+  const handleDeleteUser = async (userId: string, userEmail: string) => {
+    if (userEmail.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
+      alert("No se puede eliminar la cuenta del Super Admin titular (eldavidprz@gmail.com).");
+      return;
+    }
+    const confirmDelete = window.confirm(
+      `¿Está seguro de eliminar al usuario ${userEmail}? Sus expedientes asignados permanecerán pero el usuario ya no podrá iniciar sesión.`
+    );
+    if (!confirmDelete) return;
+
+    try {
+      await deleteUserAccount(userId, userEmail);
+      if (onRefreshUsers) onRefreshUsers();
+    } catch (e: any) {
+      alert(e.message || "Error eliminando usuario.");
+    }
+  };
+
   // Filtrado de casos por nombre o ID del cliente, radicado y título
   const filteredCases = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
 
     return allCases.filter((c) => {
-      // Resolver nombre y correo del usuario desde el directorio si no está presente en el caso
       const assignedUser = registeredUsers.find(
         (u) => u.id === c.client_id || (c.client_email && u.email.toLowerCase() === c.client_email.toLowerCase())
       );
@@ -58,7 +184,6 @@ export function AdminDashboard({
         } else if (searchField === "client_id") {
           matchSearch = clientId.includes(term);
         } else {
-          // Búsqueda inteligente: Nombre del cliente, ID, correo, radicado o título
           matchSearch =
             clientName.includes(term) ||
             clientId.includes(term) ||
@@ -80,9 +205,58 @@ export function AdminDashboard({
   const totalFees = allCases.reduce((acc, c) => acc + (Number(c.total_fees) || 0), 0);
   const totalBalance = allCases.reduce((acc, c) => acc + (Number(c.balance) || 0), 0);
   const totalClients = registeredUsers.filter((u) => u.role === "client").length;
+  const isSupabaseLive = currentCfg.isConfigured;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      {/* Banner de Estado de Conexión a Supabase */}
+      <div
+        style={{
+          background: isSupabaseLive ? "rgba(34, 197, 94, 0.08)" : "rgba(234, 179, 8, 0.08)",
+          border: `1px solid ${isSupabaseLive ? "rgba(34, 197, 94, 0.35)" : "rgba(234, 179, 8, 0.35)"}`,
+          borderRadius: "8px",
+          padding: "12px 18px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "12px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontSize: "1.2rem" }}>{isSupabaseLive ? "🟢" : "🟠"}</span>
+          <div>
+            <strong style={{ color: isSupabaseLive ? "#4ade80" : "#facc15", fontSize: "0.88rem", display: "block" }}>
+              {isSupabaseLive
+                ? `Conexión a Supabase Activa (${currentCfg.url})`
+                : "Modo Local Activo — Conecte su Supabase para guardar en la nube"}
+            </strong>
+            <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
+              {isSupabaseLive
+                ? "Los casos y usuarios se sincronizan con su base de datos PostgreSQL."
+                : "Actualmente los datos se guardan en el navegador. Ingrese su URL y API Key en la pestaña '⚡ Conexión Supabase'."}
+            </span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("conexion_supabase")}
+          style={{
+            background: "transparent",
+            border: `1px solid ${isSupabaseLive ? "#4ade80" : "#facc15"}`,
+            color: isSupabaseLive ? "#4ade80" : "#facc15",
+            padding: "6px 14px",
+            borderRadius: "4px",
+            fontSize: "0.75rem",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          {isSupabaseLive ? "⚙️ Administrar Conexión Supabase" : "⚡ Conectar mi Supabase ahora"}
+        </button>
+      </div>
+
       {/* Encabezado del Dashboard de Administración */}
       <div
         style={{
@@ -98,41 +272,71 @@ export function AdminDashboard({
         }}
       >
         <div>
-          <span style={{ fontSize: "0.72rem", color: "var(--brass-light)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            Módulo del Abogado Titular · Admin Control
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+            <span style={{ fontSize: "0.72rem", color: "var(--brass-light)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              Módulo del Super Admin Titular
+            </span>
+            <span style={{ background: "rgba(217, 181, 106, 0.2)", color: "var(--brass)", fontSize: "0.7rem", padding: "2px 8px", borderRadius: "10px", fontWeight: 700 }}>
+              👑 {SUPER_ADMIN_EMAIL}
+            </span>
+          </div>
           <h2 style={{ margin: "4px 0 6px", fontSize: "1.5rem", color: "var(--text-bright)", fontFamily: "var(--font-heading)" }}>
-            Panel de Administración Procesal & Asignación de Clientes
+            Panel de Control Procesal & Administración de Clientes
           </h2>
-          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text)", maxWidth: "620px" }}>
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text)", maxWidth: "660px" }}>
             Cree nuevos procesos judiciales, asigne el <strong>ID de usuario cliente (UUID)</strong> para vincularlos en Supabase y actualice los adelantos que cada titular verá en su pantalla.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => onCreateNewCase()}
-          style={{
-            background: "var(--brass)",
-            color: "var(--ink)",
-            fontWeight: 700,
-            fontSize: "0.88rem",
-            padding: "12px 22px",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            boxShadow: "0 4px 14px rgba(217, 181, 106, 0.3)",
-          }}
-        >
-          <span>+ Crear Nuevo Caso & Asignar ID</span>
-        </button>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("clientes");
+              setIsCreateUserModalOpen(true);
+            }}
+            style={{
+              background: "rgba(56, 189, 248, 0.15)",
+              color: "#38bdf8",
+              fontWeight: 700,
+              fontSize: "0.85rem",
+              padding: "10px 18px",
+              border: "1px solid rgba(56, 189, 248, 0.4)",
+              borderRadius: "4px",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <span>👤 + Crear Usuario</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onCreateNewCase()}
+            style={{
+              background: "var(--brass)",
+              color: "var(--ink)",
+              fontWeight: 700,
+              fontSize: "0.85rem",
+              padding: "10px 20px",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              boxShadow: "0 4px 14px rgba(217, 181, 106, 0.3)",
+            }}
+          >
+            <span>+ Crear Nuevo Caso</span>
+          </button>
+        </div>
       </div>
 
       {/* Tarjetas de Métricas del Despacho */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
         <div style={{ background: "var(--ink-soft)", padding: "16px", borderRadius: "6px", border: "1px solid var(--line)" }}>
           <span style={{ fontSize: "0.74rem", color: "var(--text-muted)", textTransform: "uppercase" }}>Expedientes Registrados</span>
           <strong style={{ fontSize: "1.6rem", display: "block", color: "var(--brass)", marginTop: "4px" }}>
@@ -146,7 +350,7 @@ export function AdminDashboard({
           <strong style={{ fontSize: "1.6rem", display: "block", color: "#38bdf8", marginTop: "4px" }}>
             {totalClients}
           </strong>
-          <small style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>Usuarios con cuenta creada</small>
+          <small style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>Usuarios con cuenta</small>
         </div>
 
         <div style={{ background: "var(--ink-soft)", padding: "16px", borderRadius: "6px", border: "1px solid var(--line)" }}>
@@ -166,8 +370,8 @@ export function AdminDashboard({
         </div>
       </div>
 
-      {/* Selector de Pestañas: Casos vs Directorio de Clientes */}
-      <div style={{ display: "flex", gap: "10px", borderBottom: "1px solid var(--line)", paddingBottom: "10px" }}>
+      {/* Selector de Pestañas Principales */}
+      <div style={{ display: "flex", gap: "10px", borderBottom: "1px solid var(--line)", paddingBottom: "10px", flexWrap: "wrap" }}>
         <button
           type="button"
           onClick={() => setActiveTab("casos")}
@@ -199,14 +403,39 @@ export function AdminDashboard({
             cursor: "pointer",
           }}
         >
-          👥 Directorio de Clientes & IDs de Supabase ({registeredUsers.length})
+          👥 Usuarios & Cuentas ({registeredUsers.length})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("conexion_supabase")}
+          style={{
+            background: activeTab === "conexion_supabase" ? "var(--brass)" : "transparent",
+            color: activeTab === "conexion_supabase" ? "var(--ink)" : "var(--text)",
+            border: activeTab === "conexion_supabase" ? "none" : "1px solid var(--line)",
+            fontWeight: 700,
+            fontSize: "0.82rem",
+            padding: "8px 18px",
+            borderRadius: "4px",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+          }}
+        >
+          <span>⚡ Conexión Supabase & SQL</span>
+          <span style={{ fontSize: "0.65rem", padding: "1px 6px", borderRadius: "8px", background: isSupabaseLive ? "#22c55e" : "#eab308", color: "#000", fontWeight: 800 }}>
+            {isSupabaseLive ? "CONECTADO" : "LOCAL"}
+          </span>
         </button>
       </div>
 
-      {/* PESTAÑA 1: GESTIÓN DE EXPEDIENTES */}
+      {/* ======================================================== */}
+      {/* PESTAÑA 1: GESTIÓN DE EXPEDIENTES (TABLA Y TARJETAS)     */}
+      {/* ======================================================== */}
       {activeTab === "casos" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* BARRA DE BÚSQUEDA ESPECIALIZADA POR NOMBRE O ID DE CLIENTE */}
+          {/* BARRA DE BÚSQUEDA Y FILTROS */}
           <div
             style={{
               background: "var(--ink-soft)",
@@ -219,76 +448,27 @@ export function AdminDashboard({
               boxShadow: "0 2px 10px rgba(0, 0, 0, 0.12)",
             }}
           >
-            {/* Cabecera del Buscador con Estado Activo */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "1.05rem" }}>🔍</span>
-                <strong style={{ fontSize: "0.86rem", color: "var(--text-bright)" }}>
-                  Buscar & Filtrar Casos por Cliente o ID (UUID)
-                </strong>
-                {searchTerm && (
-                  <span
-                    style={{
-                      fontSize: "0.72rem",
-                      background: "rgba(217, 181, 106, 0.18)",
-                      color: "var(--brass-light)",
-                      padding: "2px 8px",
-                      borderRadius: "10px",
-                      fontWeight: 600,
-                      border: "1px solid rgba(217, 181, 106, 0.3)",
-                    }}
-                  >
-                    {filteredCases.length} caso(s) encontrado(s)
-                  </span>
-                )}
-              </div>
-
-              {/* Botón rápido para limpiar filtro activo */}
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={() => setSearchTerm("")}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--brass-light)",
-                    fontSize: "0.75rem",
-                    cursor: "pointer",
-                    textDecoration: "underline",
-                    padding: 0,
-                  }}
-                  title="Restablecer búsqueda"
-                >
-                  ✕ Limpiar filtro
-                </button>
-              )}
-            </div>
-
-            {/* Fila Principal de la Barra de Búsqueda */}
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-              {/* Campo de búsqueda con icono de borrado */}
-              <div style={{ position: "relative", flex: 2, minWidth: "260px" }}>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 280px", position: "relative" }}>
                 <input
                   type="text"
-                  placeholder={
-                    searchField === "client_name"
-                      ? "Filtrar por nombre del cliente (ej. Carlos, Roberto, Mendoza)..."
-                      : searchField === "client_id"
-                      ? "Filtrar por ID de cliente en Supabase (ej. usr_..., UUID)..."
-                      : "Buscar por nombre del cliente, ID (UUID), radicado o título..."
-                  }
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder={
+                    searchField === "client_name"
+                      ? "Buscar por nombre del cliente (ej. Carlos, Roberto)..."
+                      : searchField === "client_id"
+                      ? "Buscar por ID / UUID del cliente (ej. usr_..., a1b2...)..."
+                      : "Buscar por nombre de cliente, radicado, título o ID..."
+                  }
                   style={{
                     width: "100%",
-                    padding: "10px 36px 10px 14px",
+                    padding: "9px 36px 9px 12px",
                     background: "var(--parchment-deep)",
-                    border: searchTerm ? "1px solid var(--brass)" : "1px solid var(--line)",
-                    borderRadius: "5px",
+                    border: "1px solid var(--line)",
                     color: "var(--text-bright)",
+                    borderRadius: "4px",
                     fontSize: "0.85rem",
-                    outline: "none",
-                    transition: "border-color 0.2s ease",
                   }}
                 />
                 {searchTerm && (
@@ -306,77 +486,31 @@ export function AdminDashboard({
                       cursor: "pointer",
                       fontSize: "0.9rem",
                     }}
-                    title="Borrar texto"
                   >
                     ✕
                   </button>
                 )}
               </div>
 
-              {/* Criterio de Búsqueda: Todos / Solo Nombre / Solo ID */}
-              <div
+              {/* Filtro por campo */}
+              <select
+                value={searchField}
+                onChange={(e) => setSearchField(e.target.value as any)}
                 style={{
-                  display: "flex",
-                  gap: "2px",
+                  padding: "9px 12px",
                   background: "var(--parchment-deep)",
-                  padding: "3px",
-                  borderRadius: "5px",
                   border: "1px solid var(--line)",
+                  color: "var(--text-bright)",
+                  borderRadius: "4px",
+                  fontSize: "0.82rem",
                 }}
               >
-                <button
-                  type="button"
-                  onClick={() => setSearchField("all")}
-                  style={{
-                    padding: "6px 10px",
-                    fontSize: "0.74rem",
-                    fontWeight: searchField === "all" ? 700 : 500,
-                    background: searchField === "all" ? "var(--brass)" : "transparent",
-                    color: searchField === "all" ? "var(--ink)" : "var(--text)",
-                    border: "none",
-                    borderRadius: "3px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Todos
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSearchField("client_name")}
-                  style={{
-                    padding: "6px 10px",
-                    fontSize: "0.74rem",
-                    fontWeight: searchField === "client_name" ? 700 : 500,
-                    background: searchField === "client_name" ? "var(--brass)" : "transparent",
-                    color: searchField === "client_name" ? "var(--ink)" : "var(--text)",
-                    border: "none",
-                    borderRadius: "3px",
-                    cursor: "pointer",
-                  }}
-                  title="Filtrar exclusivamente por el nombre del cliente titular"
-                >
-                  👤 Por Nombre
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSearchField("client_id")}
-                  style={{
-                    padding: "6px 10px",
-                    fontSize: "0.74rem",
-                    fontWeight: searchField === "client_id" ? 700 : 500,
-                    background: searchField === "client_id" ? "var(--brass)" : "transparent",
-                    color: searchField === "client_id" ? "var(--ink)" : "var(--text)",
-                    border: "none",
-                    borderRadius: "3px",
-                    cursor: "pointer",
-                  }}
-                  title="Filtrar exclusivamente por el UUID de Supabase asignado"
-                >
-                  🔑 Por ID (UUID)
-                </button>
-              </div>
+                <option value="all">🔍 Todos los campos</option>
+                <option value="client_name">👤 Solo Nombre del Cliente</option>
+                <option value="client_id">🆔 Solo ID de Usuario (UUID)</option>
+              </select>
 
-              {/* Filtro por Jurisdicción / Rama */}
+              {/* Filtro por rama jurídica */}
               <select
                 value={selectedBranchFilter}
                 onChange={(e) => setSelectedBranchFilter(e.target.value)}
@@ -384,21 +518,20 @@ export function AdminDashboard({
                   padding: "9px 12px",
                   background: "var(--parchment-deep)",
                   border: "1px solid var(--line)",
-                  borderRadius: "5px",
                   color: "var(--text-bright)",
+                  borderRadius: "4px",
                   fontSize: "0.82rem",
-                  cursor: "pointer",
                 }}
               >
-                <option value="all">Todas las ramas</option>
+                <option value="all">⚖️ Todas las áreas</option>
                 <option value="civil">Civil</option>
-                <option value="restitucion">Restitución</option>
                 <option value="comercial">Comercial</option>
                 <option value="laboral">Laboral</option>
                 <option value="familia">Familia</option>
+                <option value="inmobiliario">Inmobiliario</option>
               </select>
 
-              {/* Botón de Vistas y Añadir Caso */}
+              {/* Selector de Vistas y Añadir Caso */}
               <div style={{ display: "flex", gap: "8px", marginLeft: "auto", alignItems: "center" }}>
                 <div
                   style={{
@@ -466,7 +599,7 @@ export function AdminDashboard({
               </div>
             </div>
 
-            {/* Chips de Selección Rápida de Clientes Registrados */}
+            {/* Chips de selección rápida de clientes */}
             {registeredUsers.filter((u) => u.role === "client").length > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", paddingTop: "2px" }}>
                 <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600 }}>
@@ -501,9 +634,7 @@ export function AdminDashboard({
                           display: "inline-flex",
                           alignItems: "center",
                           gap: "4px",
-                          transition: "all 0.15s ease",
                         }}
-                        title={`Filtrar casos de ${u.full_name} (ID: ${u.id})`}
                       >
                         <span>👤 {u.full_name.split(" ")[0]}</span>
                         <code style={{ fontSize: "0.62rem", opacity: 0.85 }}>({u.id.slice(0, 8)}…)</code>
@@ -514,352 +645,163 @@ export function AdminDashboard({
             )}
           </div>
 
-          {/* Listado de Casos */}
+          {/* LISTADO DE CASOS (TABLA O TARJETAS) */}
           {filteredCases.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px", background: "var(--ink-soft)", borderRadius: "6px", border: "1px dashed var(--line)" }}>
               <p style={{ margin: "0 0 12px", color: "var(--text-muted)", fontSize: "0.9rem" }}>
                 {allCases.length === 0
-                  ? "No hay procesos registrados todavía en el sistema. Haga clic en '+ Crear Nuevo Caso & Asignar ID' para dar de alta el primero."
-                  : "No se encontraron procesos que coincidan con la búsqueda o filtro seleccionado."}
+                  ? "No hay casos registrados aún en el sistema."
+                  : "No se encontraron casos que coincidan con la búsqueda."}
               </p>
-              {allCases.length === 0 && (
-                <button
-                  type="button"
-                  onClick={() => onCreateNewCase()}
-                  style={{ background: "var(--brass)", color: "var(--ink)", padding: "10px 20px", border: "none", borderRadius: "4px", fontWeight: 700, cursor: "pointer" }}
-                >
-                  Crear Primer Caso
-                </button>
-              )}
-            </div>
-          ) : viewMode === "table" ? (
-            /* ========================================================
-               TABLA ESTRUCTURADA DE CASOS EN SUPABASE
-               ======================================================== */
-            <div
-              style={{
-                background: "var(--parchment-deep)",
-                border: "1px solid var(--line)",
-                borderRadius: "6px",
-                overflow: "hidden",
-                boxShadow: "0 4px 18px rgba(0, 0, 0, 0.1)",
-              }}
-            >
-              <div style={{ overflowX: "auto" }}>
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    fontSize: "0.82rem",
-                    textAlign: "left",
-                    minWidth: "920px",
-                  }}
-                >
-                  <thead>
-                    <tr
-                      style={{
-                        background: "var(--ink-panel)",
-                        borderBottom: "2px solid var(--brass)",
-                        color: "var(--brass-light)",
-                      }}
-                    >
-                      <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: "0.74rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                        Expediente / Proceso
-                      </th>
-                      <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: "0.74rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                        Cliente Titular (Supabase)
-                      </th>
-                      <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: "0.74rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                        Rama
-                      </th>
-                      <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: "0.74rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                        Adelanto Procesal
-                      </th>
-                      <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: "0.74rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                        Honorarios & Saldo
-                      </th>
-                      <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: "0.74rem", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>
-                        Acciones
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredCases.map((c, index) => {
-                      const assignedUser = registeredUsers.find(
-                        (u) => u.id === c.client_id || (c.client_email && u.email.toLowerCase() === c.client_email.toLowerCase())
-                      );
-
-                      return (
-                        <tr
-                          key={c.id}
-                          style={{
-                            borderBottom: "1px solid var(--line)",
-                            background: index % 2 === 0 ? "transparent" : "rgba(255, 255, 255, 0.015)",
-                            transition: "background 0.15s ease",
-                          }}
-                        >
-                          {/* Columna 1: Expediente / Título / Radicado */}
-                          <td style={{ padding: "12px 14px", verticalAlign: "middle" }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                              <strong style={{ color: "var(--text-bright)", fontSize: "0.88rem" }}>
-                                {c.title}
-                              </strong>
-                              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-                                <span style={{ fontSize: "0.72rem", color: "var(--brass-light)", fontFamily: "monospace" }}>
-                                  Rad: {c.radicado || "En radicación"}
-                                </span>
-                                {c.authority && (
-                                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                                    · 🏛️ {c.authority}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Columna 2: Cliente Vinculado (Nombre, Email, UUID) */}
-                          <td style={{ padding: "12px 14px", verticalAlign: "middle" }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-                              <span style={{ color: "#38bdf8", fontWeight: 600, fontSize: "0.82rem" }}>
-                                👤 {c.client_name || assignedUser?.full_name || "Sin nombre registrado"}
-                              </span>
-                              <span style={{ color: "var(--text-muted)", fontSize: "0.74rem" }}>
-                                ✉️ {c.client_email || assignedUser?.email || "Sin correo"}
-                              </span>
-                              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
-                                <code
-                                  style={{
-                                    fontSize: "0.66rem",
-                                    background: "rgba(0, 0, 0, 0.35)",
-                                    padding: "2px 5px",
-                                    borderRadius: "3px",
-                                    color: "var(--brass)",
-                                    maxWidth: "150px",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  title={`UUID: ${c.client_id}`}
-                                >
-                                  ID: {c.client_id}
-                                </code>
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyId(c.client_id)}
-                                  style={{
-                                    background: "transparent",
-                                    border: "none",
-                                    color: "var(--text-muted)",
-                                    fontSize: "0.66rem",
-                                    cursor: "pointer",
-                                    padding: 0,
-                                    textDecoration: "underline",
-                                  }}
-                                  title="Copiar ID del cliente"
-                                >
-                                  {copiedId === c.client_id ? "¡Copiado!" : "Copiar"}
-                                </button>
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Columna 3: Rama Procesal */}
-                          <td style={{ padding: "12px 14px", verticalAlign: "middle" }}>
-                            <span
-                              style={{
-                                fontSize: "0.72rem",
-                                background: "rgba(217, 181, 106, 0.12)",
-                                color: "var(--brass-light)",
-                                padding: "3px 8px",
-                                borderRadius: "3px",
-                                border: "1px solid rgba(217, 181, 106, 0.25)",
-                                display: "inline-block",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {c.process_type}
-                            </span>
-                          </td>
-
-                          {/* Columna 4: Adelanto Procesal & Estado */}
-                          <td style={{ padding: "12px 14px", verticalAlign: "middle" }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "3px", minWidth: "130px" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
-                                  Avance:
-                                </span>
-                                <strong style={{ fontSize: "0.78rem", color: c.progress >= 75 ? "#4ade80" : "var(--brass)" }}>
-                                  {c.progress}%
-                                </strong>
-                              </div>
-                              <div
-                                style={{
-                                  height: "6px",
-                                  background: "rgba(255, 255, 255, 0.08)",
-                                  borderRadius: "3px",
-                                  overflow: "hidden",
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    width: `${c.progress}%`,
-                                    height: "100%",
-                                    background: c.progress >= 75 ? "#4ade80" : "var(--brass)",
-                                    borderRadius: "3px",
-                                    transition: "width 0.3s ease",
-                                  }}
-                                />
-                              </div>
-                              <span
-                                style={{
-                                  fontSize: "0.68rem",
-                                  color: "var(--text-muted)",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                  maxWidth: "140px",
-                                }}
-                                title={c.status}
-                              >
-                                {c.status}
-                              </span>
-                            </div>
-                          </td>
-
-                          {/* Columna 5: Honorarios & Saldo */}
-                          <td style={{ padding: "12px 14px", verticalAlign: "middle" }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                              <strong style={{ color: "var(--text-bright)", fontSize: "0.82rem" }}>
-                                ${(Number(c.total_fees) || 0).toLocaleString("es-CO")}
-                              </strong>
-                              <span
-                                style={{
-                                  fontSize: "0.72rem",
-                                  color: Number(c.balance) > 0 ? "#facc15" : "#4ade80",
-                                  fontWeight: 600,
-                                }}
-                              >
-                                Saldo: ${(Number(c.balance) || 0).toLocaleString("es-CO")}
-                              </span>
-                            </div>
-                          </td>
-
-                          {/* Columna 6: Acciones (Editar, Eliminar, Ver) */}
-                          <td style={{ padding: "12px 14px", verticalAlign: "middle", textAlign: "right" }}>
-                            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
-                              {/* Botón Ver en Portal */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onSelectCase(c);
-                                  onNavigateToSection("resumen");
-                                }}
-                                style={{
-                                  background: "transparent",
-                                  border: "1px solid var(--line)",
-                                  color: "var(--text)",
-                                  padding: "5px 8px",
-                                  borderRadius: "3px",
-                                  fontSize: "0.74rem",
-                                  cursor: "pointer",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "3px",
-                                }}
-                                title="Abrir en vista de expediente"
-                              >
-                                <span>👁️ Ver</span>
-                              </button>
-
-                              {/* Botón Editar Caso */}
-                              <button
-                                type="button"
-                                onClick={() => onEditCase(c)}
-                                style={{
-                                  background: "rgba(217, 181, 106, 0.15)",
-                                  border: "1px solid var(--brass)",
-                                  color: "var(--brass-light)",
-                                  padding: "5px 10px",
-                                  borderRadius: "3px",
-                                  fontSize: "0.74rem",
-                                  fontWeight: 600,
-                                  cursor: "pointer",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "4px",
-                                }}
-                                title="Modificar expediente, vincular cliente o actualizar adelantos"
-                              >
-                                <span>✏️ Editar</span>
-                              </button>
-
-                              {/* Botón Eliminar Caso */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (window.confirm(`¿Está seguro de eliminar el proceso "${c.title}" de la base de datos de Supabase? Esta acción no se puede deshacer.`)) {
-                                    onDeleteCase(c.id);
-                                  }
-                                }}
-                                style={{
-                                  background: "rgba(239, 68, 68, 0.12)",
-                                  border: "1px solid #ef4444",
-                                  color: "#f87171",
-                                  padding: "5px 8px",
-                                  borderRadius: "3px",
-                                  fontSize: "0.74rem",
-                                  cursor: "pointer",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "3px",
-                                }}
-                                title="Eliminar entrada de Supabase"
-                              >
-                                <span>🗑️ Eliminar</span>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pie de Tabla con Resumen y Estado de Supabase */}
-              <div
+              <button
+                type="button"
+                onClick={() => onCreateNewCase()}
                 style={{
-                  background: "var(--ink-soft)",
-                  padding: "10px 16px",
-                  borderTop: "1px solid var(--line)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  fontSize: "0.74rem",
-                  color: "var(--text-muted)",
-                  flexWrap: "wrap",
-                  gap: "10px",
+                  background: "var(--brass)",
+                  color: "var(--ink)",
+                  border: "none",
+                  padding: "8px 18px",
+                  borderRadius: "4px",
+                  fontWeight: 700,
+                  cursor: "pointer",
                 }}
               >
-                <div>
-                  Mostrando <strong>{filteredCases.length}</strong> de <strong>{allCases.length}</strong> expedientes registrados
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#4ade80" }} />
-                  <span>Sincronización activa con Supabase PostgreSQL</span>
-                </div>
-              </div>
+                + Crear el Primer Caso
+              </button>
+            </div>
+          ) : viewMode === "table" ? (
+            /* VISTA EN TABLA COMPLETA */
+            <div style={{ background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "6px", overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem", textAlign: "left" }}>
+                <thead>
+                  <tr style={{ background: "var(--ink-soft)", borderBottom: "1px solid var(--line)", color: "var(--text-muted)", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ padding: "12px 14px" }}>Radicado & Proceso</th>
+                    <th style={{ padding: "12px 14px" }}>Cliente Titular</th>
+                    <th style={{ padding: "12px 14px" }}>Rama / Despacho</th>
+                    <th style={{ padding: "12px 14px" }}>Adelanto Procesal</th>
+                    <th style={{ padding: "12px 14px" }}>Honorarios & Saldo</th>
+                    <th style={{ padding: "12px 14px", textAlign: "right" }}>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCases.map((c) => {
+                    const assignedUser = registeredUsers.find(
+                      (u) => u.id === c.client_id || (c.client_email && u.email.toLowerCase() === c.client_email.toLowerCase())
+                    );
+                    const clientName = c.client_name || assignedUser?.full_name || "Sin nombre";
+                    const clientEmail = c.client_email || assignedUser?.email || "Sin correo";
+
+                    return (
+                      <tr key={c.id} style={{ borderBottom: "1px solid var(--line)" }}>
+                        <td style={{ padding: "12px 14px" }}>
+                          <strong style={{ color: "var(--text-bright)", display: "block" }}>{c.title}</strong>
+                          <span style={{ color: "var(--brass)", fontSize: "0.75rem", fontFamily: "monospace" }}>
+                            {c.radicado || "Sin radicado asignado"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "12px 14px" }}>
+                          <strong style={{ display: "block", color: "var(--text-bright)" }}>{clientName}</strong>
+                          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "block" }}>{clientEmail}</span>
+                          {c.client_id && (
+                            <code style={{ fontSize: "0.68rem", color: "#38bdf8", background: "rgba(56, 189, 248, 0.1)", padding: "1px 5px", borderRadius: "3px" }}>
+                              ID: {c.client_id.slice(0, 10)}…
+                            </code>
+                          )}
+                        </td>
+                        <td style={{ padding: "12px 14px" }}>
+                          <span style={{ display: "inline-block", background: "rgba(217, 181, 106, 0.12)", color: "var(--brass)", padding: "2px 8px", borderRadius: "4px", fontSize: "0.7rem", fontWeight: 700, marginBottom: "4px" }}>
+                            {c.process_type}
+                          </span>
+                          <span style={{ display: "block", fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                            {c.authority || "Juzgado no asignado"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "12px 14px", minWidth: "140px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: "3px" }}>
+                            <span style={{ color: "var(--text-muted)" }}>{c.status}</span>
+                            <strong style={{ color: c.progress >= 75 ? "#4ade80" : "var(--brass)" }}>{c.progress}%</strong>
+                          </div>
+                          <div style={{ height: "6px", background: "rgba(255,255,255,0.08)", borderRadius: "3px", overflow: "hidden" }}>
+                            <div style={{ width: `${c.progress}%`, height: "100%", background: c.progress >= 75 ? "#4ade80" : "var(--brass)" }} />
+                          </div>
+                        </td>
+                        <td style={{ padding: "12px 14px" }}>
+                          <strong style={{ color: "var(--text-bright)", display: "block" }}>
+                            ${(Number(c.total_fees) || 0).toLocaleString("es-CO")}
+                          </strong>
+                          <span style={{ fontSize: "0.72rem", color: Number(c.balance) > 0 ? "#facc15" : "#4ade80" }}>
+                            Saldo: ${(Number(c.balance) || 0).toLocaleString("es-CO")}
+                          </span>
+                        </td>
+                        <td style={{ padding: "12px 14px", textAlign: "right", whiteSpace: "nowrap" }}>
+                          <div style={{ display: "inline-flex", gap: "6px" }}>
+                            <button
+                              type="button"
+                              onClick={() => onSelectCase(c)}
+                              style={{
+                                background: "rgba(56, 189, 248, 0.1)",
+                                border: "1px solid rgba(56, 189, 248, 0.3)",
+                                color: "#38bdf8",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                fontSize: "0.72rem",
+                                cursor: "pointer",
+                              }}
+                              title="Ver en portal"
+                            >
+                              👁️ Ver
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onEditCase(c)}
+                              style={{
+                                background: "rgba(217, 181, 106, 0.15)",
+                                border: "1px solid var(--brass)",
+                                color: "var(--brass-light)",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                fontSize: "0.72rem",
+                                cursor: "pointer",
+                              }}
+                              title="Editar caso y adelantos"
+                            >
+                              ✏️ Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`¿Está seguro de eliminar el caso "${c.title}"?`)) {
+                                  onDeleteCase(c.id);
+                                }
+                              }}
+                              style={{
+                                background: "rgba(239, 68, 68, 0.1)",
+                                border: "1px solid rgba(239, 68, 68, 0.3)",
+                                color: "#ef4444",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                fontSize: "0.72rem",
+                                cursor: "pointer",
+                              }}
+                              title="Eliminar caso"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           ) : (
-            /* ========================================================
-               VISTA DE TARJETAS (FALLBACK / MODO VISUAL)
-               ======================================================== */
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            /* VISTA EN TARJETAS */
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px" }}>
               {filteredCases.map((c) => {
                 const assignedUser = registeredUsers.find(
                   (u) => u.id === c.client_id || (c.client_email && u.email.toLowerCase() === c.client_email.toLowerCase())
                 );
-
                 return (
                   <div
                     key={c.id}
@@ -867,160 +809,69 @@ export function AdminDashboard({
                       background: "var(--parchment-deep)",
                       border: "1px solid var(--line)",
                       borderRadius: "6px",
-                      padding: "18px 20px",
+                      padding: "16px",
                       display: "flex",
                       flexDirection: "column",
+                      justifyContent: "space-between",
                       gap: "12px",
-                      transition: "border-color 0.2s ease",
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
-                      <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                          <span style={{ fontSize: "0.72rem", background: "rgba(217, 181, 106, 0.15)", color: "var(--brass-light)", padding: "2px 8px", borderRadius: "3px", fontWeight: 700 }}>
-                            {c.process_type}
-                          </span>
-                          {c.radicado && (
-                            <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
-                              Rad: {c.radicado}
-                            </span>
-                          )}
-                        </div>
-                        <h4 style={{ margin: 0, fontSize: "1.1rem", color: "var(--text-bright)", fontFamily: "var(--font-heading)" }}>
-                          {c.title}
-                        </h4>
-                      </div>
-
-                      {/* Botones de Acción */}
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onSelectCase(c);
-                            onNavigateToSection("resumen");
-                          }}
-                          style={{
-                            background: "transparent",
-                            border: "1px solid var(--line)",
-                            color: "var(--text-bright)",
-                            padding: "6px 12px",
-                            borderRadius: "4px",
-                            fontSize: "0.75rem",
-                            cursor: "pointer",
-                          }}
-                          title="Abrir este expediente en el portal"
-                        >
-                          👁️ Ver en Portal
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => onEditCase(c)}
-                          style={{
-                            background: "rgba(217, 181, 106, 0.15)",
-                            border: "1px solid var(--brass)",
-                            color: "var(--brass-light)",
-                            padding: "6px 12px",
-                            borderRadius: "4px",
-                            fontSize: "0.75rem",
-                            fontWeight: 600,
-                            cursor: "pointer",
-                          }}
-                          title="Modificar radicado, adelantos o reasignar cliente"
-                        >
-                          ✏️ Editar
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (window.confirm(`¿Desea eliminar el proceso "${c.title}" de Supabase?`)) {
-                              onDeleteCase(c.id);
-                            }
-                          }}
-                          style={{
-                            background: "rgba(239, 68, 68, 0.12)",
-                            border: "1px solid #ef4444",
-                            color: "#f87171",
-                            padding: "6px 10px",
-                            borderRadius: "4px",
-                            fontSize: "0.75rem",
-                            cursor: "pointer",
-                          }}
-                          title="Eliminar proceso"
-                        >
-                          🗑️ Eliminar
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Fila de Datos Clave: Cliente Asignado & ID, Progreso y Valores */}
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1.3fr 1.2fr 1fr",
-                        gap: "14px",
-                        background: "var(--ink-soft)",
-                        padding: "12px 14px",
-                        borderRadius: "4px",
-                        border: "1px solid var(--line)",
-                      }}
-                    >
-                      {/* Cliente Vinculado y su ID */}
-                      <div>
-                        <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "block", textTransform: "uppercase" }}>
-                          Cliente Vinculado en Supabase:
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                        <span style={{ fontSize: "0.7rem", background: "rgba(217, 181, 106, 0.15)", color: "var(--brass)", padding: "2px 8px", borderRadius: "3px", fontWeight: 700 }}>
+                          {c.process_type}
                         </span>
-                        <strong style={{ fontSize: "0.85rem", color: "#38bdf8", display: "block", marginTop: "2px" }}>
-                          👤 {c.client_name || assignedUser?.full_name || "Sin nombre registrado"}
-                        </strong>
-                        <span style={{ fontSize: "0.75rem", color: "var(--text)", display: "block" }}>
-                          ✉️ {c.client_email || assignedUser?.email || "Sin email"}
-                        </span>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
-                          <code style={{ fontSize: "0.68rem", background: "rgba(0,0,0,0.3)", padding: "2px 6px", borderRadius: "3px", color: "var(--brass)" }}>
-                            ID: {c.client_id}
-                          </code>
+                        <div style={{ display: "flex", gap: "6px" }}>
                           <button
                             type="button"
-                            onClick={() => handleCopyId(c.client_id)}
-                            style={{ background: "transparent", border: "none", color: "var(--text-muted)", fontSize: "0.68rem", cursor: "pointer", textDecoration: "underline" }}
+                            onClick={() => onEditCase(c)}
+                            style={{ background: "transparent", border: "1px solid var(--brass)", color: "var(--brass)", padding: "3px 8px", borderRadius: "3px", fontSize: "0.7rem", cursor: "pointer" }}
                           >
-                            {copiedId === c.client_id ? "¡Copiado!" : "Copiar ID"}
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`¿Eliminar caso "${c.title}"?`)) onDeleteCase(c.id);
+                            }}
+                            style={{ background: "transparent", border: "1px solid #ef4444", color: "#ef4444", padding: "3px 8px", borderRadius: "3px", fontSize: "0.7rem", cursor: "pointer" }}
+                          >
+                            Eliminar
                           </button>
                         </div>
                       </div>
+                      <h4 style={{ margin: "0 0 4px", fontSize: "1rem", color: "var(--text-bright)" }}>{c.title}</h4>
+                      <code style={{ fontSize: "0.72rem", color: "var(--brass)", display: "block", marginBottom: "8px" }}>
+                        Radicado: {c.radicado || "N/A"}
+                      </code>
+                      <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                        Cliente: <strong>{c.client_name || assignedUser?.full_name || "No especificado"}</strong>
+                      </p>
+                    </div>
 
-                      {/* Avance Procesal (Adelantos) */}
+                    <div style={{ borderTop: "1px solid var(--line)", paddingTop: "10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                          <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", textTransform: "uppercase" }}>
-                            Adelanto Procesal:
-                          </span>
-                          <strong style={{ fontSize: "0.82rem", color: c.progress >= 75 ? "#4ade80" : "var(--brass)" }}>
-                            {c.progress}%
-                          </strong>
+                        <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "block" }}>Adelanto: {c.progress}%</span>
+                        <div style={{ width: "80px", height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
+                          <div style={{ width: `${c.progress}%`, height: "100%", background: "var(--brass)" }} />
                         </div>
-                        <div style={{ height: "6px", background: "rgba(255,255,255,0.1)", borderRadius: "3px", overflow: "hidden", marginBottom: "6px" }}>
-                          <div style={{ width: `${c.progress}%`, height: "100%", background: c.progress >= 75 ? "#4ade80" : "var(--brass)", borderRadius: "3px" }} />
-                        </div>
-                        <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
-                          Fase: {c.status}
-                        </span>
                       </div>
-
-                      {/* Aspectos Económicos */}
-                      <div style={{ textAlign: "right" }}>
-                        <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "block", textTransform: "uppercase" }}>
-                          Honorarios Pactados:
-                        </span>
-                        <strong style={{ fontSize: "0.88rem", color: "var(--text-bright)", display: "block" }}>
-                          ${(Number(c.total_fees) || 0).toLocaleString("es-CO")}
-                        </strong>
-                        <span style={{ fontSize: "0.72rem", color: Number(c.balance) > 0 ? "#facc15" : "#4ade80" }}>
-                          Saldo: ${(Number(c.balance) || 0).toLocaleString("es-CO")}
-                        </span>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onSelectCase(c)}
+                        style={{
+                          background: "var(--brass)",
+                          color: "var(--ink)",
+                          border: "none",
+                          padding: "6px 12px",
+                          borderRadius: "4px",
+                          fontSize: "0.75rem",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Ver en Portal →
+                      </button>
                     </div>
                   </div>
                 );
@@ -1030,103 +881,334 @@ export function AdminDashboard({
         </div>
       )}
 
-      {/* PESTAÑA 2: DIRECTORIO DE CLIENTES & IDs DE SUPABASE */}
+      {/* ======================================================== */}
+      {/* PESTAÑA 2: USUARIOS & CUENTAS (SUPER ADMIN)             */}
+      {/* ======================================================== */}
       {activeTab === "clientes" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div style={{ background: "rgba(56, 189, 248, 0.08)", border: "1px solid rgba(56, 189, 248, 0.25)", padding: "14px", borderRadius: "6px" }}>
-            <h4 style={{ margin: "0 0 4px", fontSize: "0.9rem", color: "#38bdf8" }}>
-              ℹ️ ¿Cómo funciona la vinculación por ID de usuario?
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          {/* Instrucciones y Ayuda para Supabase */}
+          <div
+            style={{
+              background: "rgba(56, 189, 248, 0.08)",
+              border: "1px solid rgba(56, 189, 248, 0.25)",
+              padding: "16px 20px",
+              borderRadius: "6px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+            }}
+          >
+            <h4 style={{ margin: 0, fontSize: "0.95rem", color: "#38bdf8", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>✉️ ¿Cómo crear cuentas o enviar correos de invitación desde Supabase?</span>
             </h4>
-            <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--text)" }}>
-              Cada cliente registrado tiene un <strong>ID único de usuario (UUID)</strong> en la tabla <code>profiles</code> de Supabase. Al crear un caso, este ID se asigna en <code>cases.client_id</code>, garantizando que cuando ese cliente ingrese a su cuenta, el sistema cargue automáticamente su caso con todos sus adelantos.
+            <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text)", lineHeight: 1.5 }}>
+              Para invitar a sus clientes o crearles cuenta directamente desde la nube de Supabase:
             </p>
+            <ol style={{ margin: "4px 0 0", paddingLeft: "20px", fontSize: "0.8rem", color: "var(--text)", lineHeight: 1.6 }}>
+              <li>
+                Abra su panel en <strong><a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" style={{ color: "#38bdf8" }}>https://supabase.com/dashboard</a></strong> y seleccione su proyecto.
+              </li>
+              <li>
+                En el menú de la izquierda, ingrese a <strong>Authentication → Users</strong>.
+              </li>
+              <li>
+                Haga clic en el botón verde superior <strong>"Add User"</strong>:
+                <ul style={{ marginTop: "4px" }}>
+                  <li><strong>"Send invite"</strong>: Supabase enviará un correo automático para que el cliente configure su propia contraseña.</li>
+                  <li><strong>"Create user"</strong>: Crea el correo y contraseña directamente para entregársela al cliente.</li>
+                </ul>
+              </li>
+              <li>
+                <strong>Tip de Acceso Inmediato:</strong> En <em>Authentication → Providers → Email</em>, desmarque la opción <em>"Confirm email"</em> si prefiere que los clientes entren de inmediato sin esperar confirmación por correo.
+              </li>
+              <li>
+                Al crearse el usuario, copie su <strong>User UID</strong> y úselo como ID de cliente al vincular un caso aquí.
+              </li>
+            </ol>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px" }}>
-            {registeredUsers
-              .filter((u) => u.role === "client")
-              .map((u) => {
-                const clientCases = allCases.filter(
-                  (c) => c.client_id === u.id || (c.client_email && c.client_email.toLowerCase() === u.email.toLowerCase())
-                );
+          {/* Barra superior de gestión de usuarios */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+            <div>
+              <h3 style={{ margin: "0 0 4px", fontSize: "1.15rem", color: "var(--text-bright)" }}>
+                Directorio de Usuarios & Cuentas Registradas ({registeredUsers.length})
+              </h3>
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                Cuentas activas en la base de datos. Como Super Admin (<strong>{SUPER_ADMIN_EMAIL}</strong>) puede crear nuevos usuarios y asignar expedientes.
+              </p>
+            </div>
 
-                return (
-                  <div
-                    key={u.id}
-                    style={{
-                      background: "var(--parchment-deep)",
-                      border: "1px solid var(--line)",
-                      borderRadius: "6px",
-                      padding: "18px",
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "space-between",
-                      gap: "14px",
-                    }}
+            <button
+              type="button"
+              onClick={() => setIsCreateUserModalOpen(true)}
+              style={{
+                background: "var(--brass)",
+                color: "var(--ink)",
+                fontWeight: 700,
+                fontSize: "0.85rem",
+                padding: "10px 18px",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                boxShadow: "0 2px 10px rgba(217, 181, 106, 0.25)",
+              }}
+            >
+              <span>+ Crear Nueva Cuenta</span>
+            </button>
+          </div>
+
+          {/* Formulario Modal / En línea para Crear Nuevo Usuario */}
+          {isCreateUserModalOpen && (
+            <div
+              style={{
+                background: "var(--ink-soft)",
+                border: "1px solid var(--brass)",
+                borderRadius: "8px",
+                padding: "20px",
+                boxShadow: "0 6px 20px rgba(0, 0, 0, 0.4)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                <h4 style={{ margin: 0, fontSize: "1.05rem", color: "var(--brass-light)" }}>
+                  + Crear Nueva Cuenta de Usuario en Supabase
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreateUserModalOpen(false);
+                    setUserCreationFeedback(null);
+                  }}
+                  style={{ background: "transparent", border: "none", color: "var(--text-muted)", fontSize: "1rem", cursor: "pointer" }}
+                >
+                  ✕ Cerrar
+                </button>
+              </div>
+
+              {userCreationFeedback && (
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "4px",
+                    marginBottom: "14px",
+                    fontSize: "0.82rem",
+                    background: userCreationFeedback.type === "success" ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                    border: `1px solid ${userCreationFeedback.type === "success" ? "#22c55e" : "#ef4444"}`,
+                    color: userCreationFeedback.type === "success" ? "#4ade80" : "#ef4444",
+                  }}
+                >
+                  {userCreationFeedback.text}
+                </div>
+              )}
+
+              <form onSubmit={handleCreateUserSubmit} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                    Nombre Completo *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newFullName}
+                    onChange={(e) => setNewFullName(e.target.value)}
+                    placeholder="Ej. Roberto Gómez"
+                    style={{ width: "100%", padding: "8px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                    Correo Electrónico *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="cliente@ejemplo.com"
+                    style={{ width: "100%", padding: "8px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                    Contraseña Inicial *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    style={{ width: "100%", padding: "8px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                    Rol en el Sistema
+                  </label>
+                  <select
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value as any)}
+                    style={{ width: "100%", padding: "8px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
                   >
-                    <div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                    <option value="client">👤 Cliente Titular (Solo ve su caso)</option>
+                    <option value="firm">⚖️ Abogado / Firma (Acceso a todos los casos)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                    Cédula / Documento (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={newIdNumber}
+                    onChange={(e) => setNewIdNumber(e.target.value)}
+                    placeholder="C.C. 1.020.304.050"
+                    style={{ width: "100%", padding: "8px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                    Teléfono (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value)}
+                    placeholder="+57 300 123 4567"
+                    style={{ width: "100%", padding: "8px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
+                  />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateUserModalOpen(false)}
+                    style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--text)", padding: "8px 16px", borderRadius: "4px", fontSize: "0.82rem", cursor: "pointer" }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={userCreationLoading}
+                    style={{ background: "var(--brass)", color: "var(--ink)", fontWeight: 700, padding: "8px 20px", border: "none", borderRadius: "4px", fontSize: "0.82rem", cursor: "pointer" }}
+                  >
+                    {userCreationLoading ? "Creando en Supabase…" : "Registrar y Crear Cuenta"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Directorio de Cuentas en Tarjetas */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px" }}>
+            {registeredUsers.map((u) => {
+              const isSuper = u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+              const clientCases = allCases.filter(
+                (c) => c.client_id === u.id || (c.client_email && c.client_email.toLowerCase() === u.email.toLowerCase())
+              );
+
+              return (
+                <div
+                  key={u.id}
+                  style={{
+                    background: isSuper ? "rgba(217, 181, 106, 0.08)" : "var(--parchment-deep)",
+                    border: `1px solid ${isSuper ? "var(--brass)" : "var(--line)"}`,
+                    borderRadius: "6px",
+                    padding: "18px",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: "14px",
+                  }}
+                >
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                      {isSuper ? (
+                        <span style={{ fontSize: "0.72rem", background: "var(--brass)", color: "var(--ink)", padding: "2px 8px", borderRadius: "3px", fontWeight: 800 }}>
+                          👑 Super Admin Titular
+                        </span>
+                      ) : u.role === "firm" ? (
+                        <span style={{ fontSize: "0.72rem", background: "rgba(217, 181, 106, 0.15)", color: "var(--brass)", padding: "2px 8px", borderRadius: "3px", fontWeight: 700 }}>
+                          ⚖️ Abogado / Firma
+                        </span>
+                      ) : (
                         <span style={{ fontSize: "0.72rem", background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8", padding: "2px 8px", borderRadius: "3px", fontWeight: 700 }}>
                           👤 Cliente Titular
                         </span>
-                        <span style={{ fontSize: "0.72rem", color: clientCases.length > 0 ? "#4ade80" : "#facc15" }}>
-                          {clientCases.length > 0 ? `✅ ${clientCases.length} caso(s) asignado(s)` : "⚠️ Sin caso asignado"}
-                        </span>
-                      </div>
-
-                      <h4 style={{ margin: "0 0 4px", fontSize: "1.05rem", color: "var(--text-bright)" }}>
-                        {u.full_name}
-                      </h4>
-                      <p style={{ margin: "0 0 8px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                        {u.email}
-                      </p>
-
-                      {u.id_number && (
-                        <p style={{ margin: "0 0 10px", fontSize: "0.75rem", color: "var(--text)" }}>
-                          Documento: {u.id_number}
-                        </p>
                       )}
 
-                      {/* Bloque del ID de Usuario de Supabase */}
-                      <div
-                        style={{
-                          background: "var(--ink-soft)",
-                          border: "1px dashed var(--line)",
-                          padding: "8px 10px",
-                          borderRadius: "4px",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: "8px",
-                        }}
-                      >
-                        <div>
-                          <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", display: "block" }}>
-                            ID de Usuario (client_id):
-                          </span>
-                          <code style={{ fontSize: "0.75rem", color: "var(--brass)", wordBreak: "break-all" }}>
-                            {u.id}
-                          </code>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyId(u.id)}
-                          style={{
-                            background: "transparent",
-                            border: "1px solid var(--line)",
-                            color: "var(--text-bright)",
-                            fontSize: "0.7rem",
-                            padding: "4px 8px",
-                            borderRadius: "3px",
-                            cursor: "pointer",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {copiedId === u.id ? "¡Copiado!" : "Copiar"}
-                        </button>
-                      </div>
+                      <span style={{ fontSize: "0.72rem", color: clientCases.length > 0 ? "#4ade80" : "var(--text-muted)" }}>
+                        {clientCases.length > 0 ? `📁 ${clientCases.length} caso(s)` : "Sin casos"}
+                      </span>
                     </div>
 
+                    <h4 style={{ margin: "0 0 4px", fontSize: "1.05rem", color: "var(--text-bright)" }}>
+                      {u.full_name}
+                    </h4>
+                    <p style={{ margin: "0 0 6px", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                      {u.email}
+                    </p>
+
+                    {u.id_number && (
+                      <p style={{ margin: "0 0 6px", fontSize: "0.74rem", color: "var(--text)" }}>
+                        Documento: {u.id_number}
+                      </p>
+                    )}
+
+                    {u.phone && (
+                      <p style={{ margin: "0 0 10px", fontSize: "0.74rem", color: "var(--text)" }}>
+                        Teléfono: {u.phone}
+                      </p>
+                    )}
+
+                    {/* Bloque del ID de Usuario de Supabase */}
+                    <div
+                      style={{
+                        background: "var(--ink-soft)",
+                        border: "1px dashed var(--line)",
+                        padding: "8px 10px",
+                        borderRadius: "4px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "8px",
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", display: "block" }}>
+                          ID de Usuario en Supabase:
+                        </span>
+                        <code style={{ fontSize: "0.75rem", color: "var(--brass)", wordBreak: "break-all" }}>
+                          {u.id}
+                        </code>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyId(u.id)}
+                        style={{
+                          background: "transparent",
+                          border: "1px solid var(--line)",
+                          color: "var(--text-bright)",
+                          fontSize: "0.7rem",
+                          padding: "4px 8px",
+                          borderRadius: "3px",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {copiedId === u.id ? "¡Copiado!" : "Copiar"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
                     <button
                       type="button"
                       onClick={() => onCreateNewCase(u.id, u.email, u.full_name)}
@@ -1134,22 +1216,248 @@ export function AdminDashboard({
                         background: "var(--brass)",
                         color: "var(--ink)",
                         fontWeight: 700,
-                        fontSize: "0.8rem",
-                        padding: "8px 14px",
+                        fontSize: "0.75rem",
+                        padding: "7px 12px",
                         border: "none",
                         borderRadius: "4px",
                         cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "6px",
+                        flex: "1 1 140px",
+                        textAlign: "center",
                       }}
                     >
-                      <span>+ Vincular Nuevo Caso a este Cliente</span>
+                      + Vincular Nuevo Caso
                     </button>
+
+                    {!isSuper && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteUser(u.id, u.email)}
+                        style={{
+                          background: "transparent",
+                          border: "1px solid rgba(239, 68, 68, 0.4)",
+                          color: "#ef4444",
+                          fontSize: "0.75rem",
+                          padding: "7px 10px",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                        }}
+                        title="Eliminar usuario del sistema"
+                      >
+                        🗑️ Eliminar
+                      </button>
+                    )}
                   </div>
-                );
-              })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* PESTAÑA 3: CONEXIÓN SUPABASE & SQL (NUBE POSTGRESQL)      */}
+      {/* ======================================================== */}
+      {activeTab === "conexion_supabase" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          {/* Tarjeta de Configuración de API Keys */}
+          <div
+            style={{
+              background: "var(--ink-soft)",
+              border: "1px solid var(--line)",
+              borderRadius: "8px",
+              padding: "24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "18px",
+            }}
+          >
+            <div>
+              <span style={{ fontSize: "0.72rem", color: "var(--brass-light)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                Integración de Base de Datos en Tiempo Real
+              </span>
+              <h3 style={{ margin: "4px 0 6px", fontSize: "1.3rem", color: "var(--text-bright)", fontFamily: "var(--font-heading)" }}>
+                Conectar Credenciales de Supabase
+              </h3>
+              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text)", maxWidth: "700px" }}>
+                Obtenga estos dos datos en su panel de Supabase: vaya a <strong>Project Settings → API</strong>.
+                Al ingresarlos y guardar, los casos y las cuentas se almacenarán permanentemente en su nube de Supabase.
+              </p>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "14px" }}>
+              <div>
+                <label style={{ fontSize: "0.78rem", color: "var(--text-bright)", display: "block", marginBottom: "6px", fontWeight: 600 }}>
+                  Project URL (VITE_SUPABASE_URL) *
+                </label>
+                <input
+                  type="text"
+                  value={supabaseUrlInput}
+                  onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                  placeholder="https://xyzcompany.supabase.co"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    background: "var(--parchment-deep)",
+                    border: "1px solid var(--line)",
+                    color: "var(--text-bright)",
+                    borderRadius: "4px",
+                    fontSize: "0.85rem",
+                    fontFamily: "monospace",
+                  }}
+                />
+                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "block", marginTop: "4px" }}>
+                  Encuéntrela en Supabase → Project Settings → API → Project URL
+                </span>
+              </div>
+
+              <div>
+                <label style={{ fontSize: "0.78rem", color: "var(--text-bright)", display: "block", marginBottom: "6px", fontWeight: 600 }}>
+                  Project API Key anon / public (VITE_SUPABASE_ANON_KEY) *
+                </label>
+                <input
+                  type="text"
+                  value={supabaseKeyInput}
+                  onChange={(e) => setSupabaseKeyInput(e.target.value)}
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    background: "var(--parchment-deep)",
+                    border: "1px solid var(--line)",
+                    color: "var(--text-bright)",
+                    borderRadius: "4px",
+                    fontSize: "0.85rem",
+                    fontFamily: "monospace",
+                  }}
+                />
+                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "block", marginTop: "4px" }}>
+                  Encuéntrela en Supabase → Project Settings → API → Project API Keys → anon public
+                </span>
+              </div>
+            </div>
+
+            {connectionStatus && (
+              <div
+                style={{
+                  padding: "12px 16px",
+                  borderRadius: "6px",
+                  fontSize: "0.85rem",
+                  background: connectionStatus.success ? "rgba(34, 197, 94, 0.12)" : "rgba(239, 68, 68, 0.12)",
+                  border: `1px solid ${connectionStatus.success ? "#22c55e" : "#ef4444"}`,
+                  color: connectionStatus.success ? "#4ade80" : "#f87171",
+                }}
+              >
+                {connectionStatus.success ? "✅ " : "❌ "}
+                {connectionStatus.message}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+              <button
+                type="button"
+                disabled={connectionTesting}
+                onClick={handleSaveAndTestSupabase}
+                style={{
+                  background: "var(--brass)",
+                  color: "var(--ink)",
+                  fontWeight: 700,
+                  fontSize: "0.85rem",
+                  padding: "10px 22px",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                }}
+              >
+                {connectionTesting ? "Verificando con Supabase…" : "💾 Guardar Credenciales & Probar Conexión"}
+              </button>
+
+              {isSupabaseLive && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm("¿Desea desconectar Supabase y volver al modo local?")) {
+                      clearSupabaseConfig();
+                      setSupabaseUrlInput("");
+                      setSupabaseKeyInput("");
+                      setConnectionStatus(null);
+                      window.location.reload();
+                    }
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid rgba(239, 68, 68, 0.4)",
+                    color: "#ef4444",
+                    fontSize: "0.8rem",
+                    padding: "8px 14px",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Desconectar Supabase
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Script SQL para Inicializar Tablas en Supabase */}
+          <div
+            style={{
+              background: "var(--ink-soft)",
+              border: "1px solid var(--line)",
+              borderRadius: "8px",
+              padding: "24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "14px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
+              <div>
+                <h4 style={{ margin: "0 0 6px", fontSize: "1.1rem", color: "var(--text-bright)" }}>
+                  📋 Script SQL de Tablas para Supabase (1 Clic)
+                </h4>
+                <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-muted)", maxWidth: "680px" }}>
+                  Para que las tablas (<code>profiles</code>, <code>cases</code>, <code>agenda_items</code>, etc.) existan en su base de datos PostgreSQL de Supabase, copie este script, vaya a su panel de Supabase → <strong>SQL Editor</strong>, cree una nueva consulta (New Query), pegue el código y presione <strong>Run</strong>.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCopySql}
+                style={{
+                  background: copiedSql ? "#22c55e" : "var(--brass)",
+                  color: "var(--ink)",
+                  fontWeight: 700,
+                  fontSize: "0.82rem",
+                  padding: "10px 18px",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <span>{copiedSql ? "✅ ¡Código SQL Copiado!" : "📋 Copiar Todo el Script SQL"}</span>
+              </button>
+            </div>
+
+            <pre
+              style={{
+                background: "var(--ink-deep)",
+                border: "1px solid var(--line)",
+                borderRadius: "6px",
+                padding: "14px",
+                maxHeight: "340px",
+                overflowY: "auto",
+                fontSize: "0.75rem",
+                color: "#e2e8f0",
+                fontFamily: "monospace",
+                lineHeight: 1.45,
+              }}
+            >
+              {SUPABASE_SQL_SETUP_SCRIPT}
+            </pre>
           </div>
         </div>
       )}

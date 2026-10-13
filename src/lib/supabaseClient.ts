@@ -1,20 +1,15 @@
 import { createClient, Session } from "@supabase/supabase-js";
-import { defaultProfile, firmProfile, defaultCaseRecord, defaultAgenda, defaultHistory, defaultDocuments, defaultFinances } from "../data/initialData";
+import { defaultProfile, defaultAgenda, defaultHistory, defaultDocuments, defaultFinances } from "../data/initialData";
 import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem, FinancialRecord } from "../types/portal";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Super Admin Titular definido por el usuario
+export const SUPER_ADMIN_EMAIL = "eldavidprz@gmail.com";
 
-// Verifica si el usuario configuró credenciales reales de Supabase en .env
-export const isConfiguredWithRealSupabase = Boolean(
-  supabaseUrl &&
-  supabaseAnonKey &&
-  supabaseUrl.startsWith("https://") &&
-  supabaseAnonKey.length > 20
-);
-
-// Storage keys para persistencia de datos
+// Claves de almacenamiento local
+const STORAGE_SUPABASE_URL_KEY = "ja_legal_supabase_url";
+const STORAGE_SUPABASE_ANON_KEY = "ja_legal_supabase_anon_key";
 const STORAGE_CASE_KEY = "ja_legal_case_data";
+const STORAGE_CASES_LIST_KEY = "ja_legal_cases_list";
 const STORAGE_AGENDA_KEY = "ja_legal_agenda_data";
 const STORAGE_HISTORY_KEY = "ja_legal_history_data";
 const STORAGE_DOCS_KEY = "ja_legal_docs_data";
@@ -25,55 +20,140 @@ const STORAGE_USERS_KEY = "ja_legal_registered_users";
 export type StoredUser = {
   id: string;
   email: string;
-  password: string;
+  password?: string;
   full_name: string;
   initials: string;
   role: "client" | "firm";
   id_number?: string;
   phone?: string;
+  created_at?: string;
 };
 
-// Cuentas predeterminadas para cuando no hay Supabase conectado
-const INITIAL_SYSTEM_USERS: StoredUser[] = [
-  {
-    id: "usr_firm_01",
-    email: "abogado@jalegal.com.co",
-    password: "Abogado2026*",
-    full_name: "Dra. Carolina Jiménez Ariza",
-    initials: "CJ",
-    role: "firm",
-    id_number: "T.P. 182.904 del C.S.J.",
-    phone: "+57 312 214 9562",
-  },
-  {
-    id: "usr_demo_client_01",
-    email: "cliente@jalegal.com.co",
-    password: "Cliente2026*",
-    full_name: "Dr. Roberto Mendoza Vargas",
-    initials: "RM",
-    role: "client",
-    id_number: "C.C. 79.432.891 de Bogotá",
-    phone: "+57 310 455 8920",
-  },
-];
+// Obtiene la configuración activa de Supabase (prioriza lo ingresado en la interfaz, luego variables de entorno)
+export function getSupabaseConfig(): { url: string; anonKey: string; isConfigured: boolean } {
+  try {
+    const savedUrl = localStorage.getItem(STORAGE_SUPABASE_URL_KEY) || "";
+    const savedKey = localStorage.getItem(STORAGE_SUPABASE_ANON_KEY) || "";
+    const envUrl = (import.meta.env.VITE_SUPABASE_URL as string) || "";
+    const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || "";
 
+    const activeUrl = (savedUrl.trim() || envUrl.trim());
+    const activeKey = (savedKey.trim() || envKey.trim());
+
+    const isConfigured = Boolean(
+      activeUrl &&
+      activeKey &&
+      activeUrl.startsWith("https://") &&
+      activeKey.length > 20
+    );
+
+    return {
+      url: activeUrl,
+      anonKey: activeKey,
+      isConfigured,
+    };
+  } catch {
+    return { url: "", anonKey: "", isConfigured: false };
+  }
+}
+
+const currentConfig = getSupabaseConfig();
+export const isConfiguredWithRealSupabase = currentConfig.isConfigured;
+
+// Guarda credenciales de Supabase desde la interfaz de usuario
+export function saveSupabaseConfig(url: string, anonKey: string) {
+  try {
+    localStorage.setItem(STORAGE_SUPABASE_URL_KEY, url.trim());
+    localStorage.setItem(STORAGE_SUPABASE_ANON_KEY, anonKey.trim());
+  } catch (e) {
+    console.warn("Error guardando credenciales de Supabase en localStorage", e);
+  }
+}
+
+// Borra credenciales de Supabase guardadas
+export function clearSupabaseConfig() {
+  try {
+    localStorage.removeItem(STORAGE_SUPABASE_URL_KEY);
+    localStorage.removeItem(STORAGE_SUPABASE_ANON_KEY);
+  } catch (e) {
+    console.warn("Error limpiando credenciales de Supabase", e);
+  }
+}
+
+// ÚNICO Super Admin predeterminado configurado (se eliminaron las cuentas de prueba anteriores)
+export const INITIAL_SUPERADMIN_USER: StoredUser = {
+  id: "usr_superadmin_david",
+  email: SUPER_ADMIN_EMAIL,
+  password: "Admin2026*",
+  full_name: "David Pérez",
+  initials: "DP",
+  role: "firm",
+  id_number: "Super Admin Titular",
+  phone: "+57 300 000 0000",
+  created_at: new Date().toISOString(),
+};
+
+// Obtiene la lista de usuarios, eliminando cualquier cuenta demo antigua (abogado@ y cliente@)
 export function getStoredUsers(): StoredUser[] {
   try {
     const raw = localStorage.getItem(STORAGE_USERS_KEY);
-    if (raw) return JSON.parse(raw);
+    let list: StoredUser[] = [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // Filtra cualquier residuo de las cuentas demo anteriores
+        list = parsed.filter(
+          (u) =>
+            u.email.toLowerCase() !== "abogado@jalegal.com.co" &&
+            u.email.toLowerCase() !== "cliente@jalegal.com.co"
+        );
+      }
+    }
+
+    // Asegura que el Super Admin eldavidprz@gmail.com siempre esté presente como 'firm'
+    const hasSuperAdmin = list.some(
+      (u) => u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()
+    );
+    if (!hasSuperAdmin) {
+      list.unshift(INITIAL_SUPERADMIN_USER);
+    } else {
+      // Garantizar que tenga rol 'firm'
+      list = list.map((u) =>
+        u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()
+          ? { ...u, role: "firm" as const }
+          : u
+      );
+    }
+
+    // Persistir lista limpia sin las cuentas viejas
+    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(list));
+    return list;
   } catch (e) {
     console.warn("Error reading stored users", e);
+    return [INITIAL_SUPERADMIN_USER];
   }
-  return INITIAL_SYSTEM_USERS;
 }
 
 export function saveStoredUser(user: StoredUser) {
   try {
-    const users = getStoredUsers().filter((u) => u.email.toLowerCase() !== user.email.toLowerCase());
+    const users = getStoredUsers().filter(
+      (u) => u.email.toLowerCase() !== user.email.toLowerCase() && u.id !== user.id
+    );
     users.push(user);
     localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
   } catch (e) {
     console.warn("Error saving user", e);
+  }
+}
+
+export function deleteStoredUser(userId: string) {
+  try {
+    const users = getStoredUsers().filter(
+      (u) => u.id !== userId && u.email.toLowerCase() !== userId.toLowerCase()
+    );
+    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
+  } catch (e) {
+    console.warn("Error deleting user", e);
   }
 }
 
@@ -96,8 +176,6 @@ export function saveStoredFinances(data: FinancialRecord[]) {
   }
 }
 
-const STORAGE_CASES_LIST_KEY = "ja_legal_cases_list";
-
 export function getStoredCases(): CaseRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_CASES_LIST_KEY);
@@ -105,7 +183,6 @@ export function getStoredCases(): CaseRecord[] {
   } catch (e) {
     console.warn("Error reading stored cases", e);
   }
-  // Comienza vacío por el momento como solicitó el usuario!
   return [];
 }
 
@@ -143,11 +220,16 @@ export function deleteStoredCase(caseId: string) {
 // Sincroniza el caso con la base de datos de Supabase si está conectada
 export async function syncCaseToDatabase(caseRecord: CaseRecord) {
   saveStoredCase(caseRecord);
-  if (isConfiguredWithRealSupabase) {
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
     try {
-      await supabase.from("cases").upsert({
+      const client = getRealSupabaseClient();
+      await client.from("cases").upsert({
         id: caseRecord.id,
         client_id: caseRecord.client_id,
+        client_email: caseRecord.client_email,
+        client_name: caseRecord.client_name,
+        radicado: caseRecord.radicado,
         title: caseRecord.title,
         process_type: caseRecord.process_type,
         status: caseRecord.status,
@@ -159,6 +241,7 @@ export async function syncCaseToDatabase(caseRecord: CaseRecord) {
         lawyer: caseRecord.lawyer,
         observations: caseRecord.observations,
         current_phase: caseRecord.current_phase,
+        last_update: new Date().toISOString(),
       });
     } catch (e) {
       console.warn("Error syncing case to Supabase", e);
@@ -166,12 +249,32 @@ export async function syncCaseToDatabase(caseRecord: CaseRecord) {
   }
 }
 
+// Carga todos los casos desde Supabase PostgreSQL o desde almacenamiento local
+export async function fetchAllCasesFromDatabase(): Promise<CaseRecord[]> {
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
+    try {
+      const client = getRealSupabaseClient();
+      const { data, error } = await client.from("cases").select("*").order("created_at", { ascending: false });
+      if (!error && data) {
+        saveStoredCases(data);
+        return data;
+      }
+    } catch (e) {
+      console.warn("Could not fetch cases from Supabase, using local", e);
+    }
+  }
+  return getStoredCases();
+}
+
 // Elimina el caso de Supabase y de local storage
 export async function deleteCaseFromDatabase(caseId: string) {
   deleteStoredCase(caseId);
-  if (isConfiguredWithRealSupabase) {
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
     try {
-      await supabase.from("cases").delete().eq("id", caseId);
+      const client = getRealSupabaseClient();
+      await client.from("cases").delete().eq("id", caseId);
     } catch (e) {
       console.warn("Error deleting case from Supabase", e);
     }
@@ -180,19 +283,22 @@ export async function deleteCaseFromDatabase(caseId: string) {
 
 // Obtiene los perfiles de Supabase o los usuarios registrados locales
 export async function fetchProfilesOrUsers(): Promise<StoredUser[]> {
-  if (isConfiguredWithRealSupabase) {
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
     try {
-      const { data, error } = await supabase.from("profiles").select("*");
+      const client = getRealSupabaseClient();
+      const { data, error } = await client.from("profiles").select("*");
       if (!error && data && data.length > 0) {
         return data.map((p: any) => ({
           id: p.id,
           email: p.email || "",
-          full_name: p.full_name,
-          initials: p.full_name ? p.full_name.slice(0, 2).toUpperCase() : "US",
-          role: p.role || "client",
+          full_name: p.full_name || (p.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ? "David Pérez" : "Usuario"),
+          initials: p.initials || (p.full_name ? p.full_name.slice(0, 2).toUpperCase() : "US"),
+          role: p.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ? "firm" : (p.role || "client"),
           id_number: p.id_number,
           phone: p.phone,
           password: "",
+          created_at: p.created_at,
         }));
       }
     } catch (e) {
@@ -200,6 +306,99 @@ export async function fetchProfilesOrUsers(): Promise<StoredUser[]> {
     }
   }
   return getStoredUsers();
+}
+
+// Crea una cuenta de usuario tanto en Supabase Auth + Profiles como localmente
+export async function createUserAccount(userData: {
+  email: string;
+  password?: string;
+  full_name: string;
+  role: "client" | "firm";
+  id_number?: string;
+  phone?: string;
+}): Promise<{ success: boolean; user?: StoredUser; message?: string }> {
+  const cleanEmail = userData.email.trim().toLowerCase();
+  const isSuperAdmin = cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase();
+  const finalRole = isSuperAdmin ? "firm" : userData.role;
+
+  const newUser: StoredUser = {
+    id: "usr_" + Math.random().toString(36).substring(2, 9),
+    email: cleanEmail,
+    password: userData.password || "123456",
+    full_name: userData.full_name.trim(),
+    initials: userData.full_name
+      .split(" ")
+      .map((p) => p[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2) || "US",
+    role: finalRole,
+    id_number: userData.id_number?.trim() || "",
+    phone: userData.phone?.trim() || "",
+    created_at: new Date().toISOString(),
+  };
+
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
+    try {
+      const client = getRealSupabaseClient();
+      const { data: signUpData, error: signUpError } = await client.auth.signUp({
+        email: cleanEmail,
+        password: userData.password || "Cliente2026*",
+        options: {
+          data: {
+            full_name: newUser.full_name,
+            role: newUser.role,
+            id_number: newUser.id_number,
+            phone: newUser.phone,
+          },
+        },
+      });
+
+      if (signUpError && !signUpError.message.includes("already registered")) {
+        console.warn("Supabase auth signUp notice:", signUpError.message);
+      }
+
+      const assignedId = signUpData?.user?.id || newUser.id;
+      newUser.id = assignedId;
+
+      // Upsert en la tabla profiles para que se liste de inmediato
+      await client.from("profiles").upsert({
+        id: assignedId,
+        email: cleanEmail,
+        full_name: newUser.full_name,
+        initials: newUser.initials,
+        role: newUser.role,
+        id_number: newUser.id_number,
+        phone: newUser.phone,
+      });
+    } catch (e: any) {
+      console.warn("Error creando usuario en Supabase", e);
+    }
+  }
+
+  saveStoredUser(newUser);
+  return { success: true, user: newUser, message: "Usuario creado exitosamente" };
+}
+
+// Elimina un usuario de Supabase y localmente
+export async function deleteUserAccount(userId: string, email: string): Promise<boolean> {
+  if (email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
+    throw new Error("No se puede eliminar la cuenta del Super Admin titular (eldavidprz@gmail.com).");
+  }
+
+  deleteStoredUser(userId);
+
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
+    try {
+      const client = getRealSupabaseClient();
+      await client.from("profiles").delete().eq("id", userId);
+    } catch (e) {
+      console.warn("Error eliminando perfil de Supabase", e);
+    }
+  }
+  return true;
 }
 
 export function getStoredAgenda(): AgendaItem[] {
@@ -258,15 +457,21 @@ export function saveStoredDocuments(data: DocumentItem[]) {
 
 export function resetAllToDefault() {
   localStorage.removeItem(STORAGE_CASE_KEY);
+  localStorage.removeItem(STORAGE_CASES_LIST_KEY);
   localStorage.removeItem(STORAGE_AGENDA_KEY);
   localStorage.removeItem(STORAGE_HISTORY_KEY);
   localStorage.removeItem(STORAGE_DOCS_KEY);
   localStorage.removeItem(STORAGE_FINANCES_KEY);
   localStorage.removeItem(STORAGE_SESSION_KEY);
+  // Restablecer usuarios solo dejando al Super Admin
+  localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify([INITIAL_SUPERADMIN_USER]));
 }
 
 // Generador de sesión tipada
 export function createUserSession(user: StoredUser): Session {
+  const isSuperAdmin = user.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+  const role = isSuperAdmin ? "firm" : user.role;
+
   return {
     access_token: "jwt-token-" + Date.now(),
     token_type: "bearer",
@@ -281,7 +486,7 @@ export function createUserSession(user: StoredUser): Session {
       user_metadata: {
         full_name: user.full_name,
         initials: user.initials,
-        role: user.role,
+        role,
         id_number: user.id_number,
         phone: user.phone,
       },
@@ -301,7 +506,6 @@ let currentMockSession: Session | null = (() => {
       return JSON.parse(stored);
     }
   } catch {}
-  // Sin login automático falso: se inicia en null para que pida credenciales
   return null;
 })();
 
@@ -317,22 +521,30 @@ function notifyAuthChange(event: string, session: Session | null) {
   authListeners.forEach((listener) => listener(event, session));
 }
 
-// Cliente mock compatible con la API de Supabase para cuando aún no se conectan las llaves en .env
+// Cliente mock compatible con la API de Supabase para cuando aún no se conectan las credenciales
 const mockSupabase = {
   auth: {
     async getSession() {
       return { data: { session: currentMockSession }, error: null };
     },
     async signInWithPassword({ email, password }: { email: string; password?: string }) {
-      await new Promise((res) => setTimeout(res, 250));
+      await new Promise((res) => setTimeout(res, 200));
       const cleanEmail = email.trim().toLowerCase();
       const users = getStoredUsers();
-      const found = users.find((u) => u.email.toLowerCase() === cleanEmail);
+      let found = users.find((u) => u.email.toLowerCase() === cleanEmail);
+
+      // Si es el Super Admin eldavidprz@gmail.com y no existe aún, se inicializa
+      if (!found && cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase()) {
+        found = INITIAL_SUPERADMIN_USER;
+        saveStoredUser(found);
+      }
 
       if (!found) {
         return {
           data: { session: null, user: null },
-          error: { message: "Usuario no registrado en el sistema. Verifique su correo o cree una cuenta en la pestaña 'Crear Cuenta'." },
+          error: {
+            message: "Usuario no registrado en el sistema. Verifique su correo o regístrese en la pestaña 'Crear Cuenta'.",
+          },
         };
       }
 
@@ -356,9 +568,10 @@ const mockSupabase = {
       password?: string;
       options?: { data?: { full_name?: string; role?: "client" | "firm"; id_number?: string; phone?: string } };
     }) {
-      await new Promise((res) => setTimeout(res, 250));
+      await new Promise((res) => setTimeout(res, 200));
       const cleanEmail = email.trim().toLowerCase();
       const users = getStoredUsers();
+
       if (users.some((u) => u.email.toLowerCase() === cleanEmail)) {
         return {
           data: { session: null, user: null },
@@ -366,13 +579,14 @@ const mockSupabase = {
         };
       }
 
-      const fullName = options?.data?.full_name || cleanEmail.split("@")[0];
+      const isSuperAdmin = cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase();
+      const fullName = options?.data?.full_name || (isSuperAdmin ? "David Pérez" : cleanEmail.split("@")[0]);
       const initials = fullName
         .split(" ")
         .map((p) => p[0])
         .join("")
         .toUpperCase()
-        .slice(0, 2) || "JA";
+        .slice(0, 2) || "US";
 
       const newUser: StoredUser = {
         id: "usr_" + Math.random().toString(36).substring(2, 9),
@@ -380,9 +594,10 @@ const mockSupabase = {
         password: password || "123456",
         full_name: fullName,
         initials,
-        role: options?.data?.role || "client",
+        role: isSuperAdmin ? "firm" : (options?.data?.role || "client"),
         id_number: options?.data?.id_number || "",
         phone: options?.data?.phone || "",
+        created_at: new Date().toISOString(),
       };
 
       saveStoredUser(newUser);
@@ -412,17 +627,13 @@ const mockSupabase = {
     return {
       select(_columns?: string) {
         let caseIdFilter: string | null = null;
-        let clientIdFilter: string | null = null;
         let idFilter: string | null = null;
         let sortField = "event_date";
         let sortAsc = true;
-        let isSingle = false;
-        let isMaybeSingle = false;
 
         const chain = {
           eq(column: string, value: string) {
             if (column === "id") idFilter = value;
-            if (column === "client_id") clientIdFilter = value;
             if (column === "case_id") caseIdFilter = value;
             return chain;
           },
@@ -435,11 +646,9 @@ const mockSupabase = {
             return chain;
           },
           single() {
-            isSingle = true;
             return chain.execute();
           },
           maybeSingle() {
-            isMaybeSingle = true;
             return chain.execute();
           },
           async then(resolve: (value: { data: any; error: any }) => void) {
@@ -452,30 +661,25 @@ const mockSupabase = {
             if (table === "profiles") {
               const currentId = idFilter || currentMockSession?.user?.id;
               const meta = currentMockSession?.user?.user_metadata;
-              const userRole = meta?.role || "client";
+              const userEmail = currentMockSession?.user?.email?.toLowerCase();
+              const isSuper = userEmail === SUPER_ADMIN_EMAIL.toLowerCase();
+              const userRole = isSuper ? "firm" : (meta?.role || "client");
 
-              if (meta?.full_name) {
-                result = {
-                  id: currentMockSession?.user?.id || "usr_current",
-                  full_name: meta.full_name,
-                  initials: meta.initials || "JA",
-                  role: userRole,
-                  email: currentMockSession?.user?.email,
-                  id_number: meta.id_number || (userRole === "firm" ? "T.P. 182.904 C.S.J." : "C.C. Registrada"),
-                  phone: meta.phone || "",
-                };
-              } else if (userRole === "firm" || currentId === firmProfile.id) {
-                result = firmProfile;
-              } else {
-                result = defaultProfile;
-              }
+              result = {
+                id: currentId || "usr_current",
+                full_name: isSuper ? "David Pérez" : (meta?.full_name || "Usuario"),
+                initials: isSuper ? "DP" : (meta?.initials || "US"),
+                role: userRole,
+                email: currentMockSession?.user?.email,
+                id_number: meta?.id_number || (userRole === "firm" ? "Super Admin Titular" : "C.C. Registrada"),
+                phone: meta?.phone || "",
+              };
               return { data: result, error: null };
             }
 
             if (table === "cases") {
               const currentCase = getStoredCase();
-              result = currentCase;
-              return { data: result, error: null };
+              return { data: currentCase, error: null };
             }
 
             if (table === "agenda_items") {
@@ -503,13 +707,11 @@ const mockSupabase = {
             }
 
             if (table === "documents") {
-              let items = getStoredDocuments();
-              return { data: items, error: null };
+              return { data: getStoredDocuments(), error: null };
             }
 
             if (table === "financial_records") {
-              let items = getStoredFinances();
-              return { data: items, error: null };
+              return { data: getStoredFinances(), error: null };
             }
 
             return { data: [], error: null };
@@ -521,29 +723,22 @@ const mockSupabase = {
       insert(values: any) {
         return {
           async then(resolve: (value: { data: any; error: any }) => void) {
-            if (table === "financial_records") {
-              const list = getStoredFinances();
-              const newRecord = { ...values, id: values.id || "fin_" + Date.now() };
-              list.unshift(newRecord);
-              saveStoredFinances(list);
-              resolve({ data: [newRecord], error: null });
-              return;
-            }
+            resolve({ data: [values], error: null });
+          },
+        };
+      },
+      upsert(values: any) {
+        return {
+          async then(resolve: (value: { data: any; error: any }) => void) {
             resolve({ data: [values], error: null });
           },
         };
       },
       delete() {
         return {
-          eq(column: string, value: string) {
+          eq(_column: string, _value: string) {
             return {
               async then(resolve: (value: { data: any; error: any }) => void) {
-                if (table === "financial_records" && column === "id") {
-                  const filtered = getStoredFinances().filter((f) => f.id !== value);
-                  saveStoredFinances(filtered);
-                  resolve({ data: null, error: null });
-                  return;
-                }
                 resolve({ data: null, error: null });
               },
             };
@@ -554,7 +749,218 @@ const mockSupabase = {
   },
 };
 
-// Exporta el cliente activo de Supabase (real si están puestas las variables en .env, o el local inteligente)
-export const supabase = isConfiguredWithRealSupabase
-  ? createClient(supabaseUrl!, supabaseAnonKey!)
+// Singleton del cliente real de Supabase
+let realSupabaseClientInstance: any = null;
+
+export function getRealSupabaseClient() {
+  const cfg = getSupabaseConfig();
+  if (!cfg.isConfigured) {
+    return mockSupabase as any;
+  }
+  if (!realSupabaseClientInstance) {
+    realSupabaseClientInstance = createClient(cfg.url, cfg.anonKey);
+  }
+  return realSupabaseClientInstance;
+}
+
+// Prueba en tiempo real la conexión con Supabase
+export async function testSupabaseConnection(url?: string, anonKey?: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const targetUrl = url || getSupabaseConfig().url;
+    const targetKey = anonKey || getSupabaseConfig().anonKey;
+
+    if (!targetUrl || !targetKey || !targetUrl.startsWith("https://")) {
+      return {
+        success: false,
+        message: "URL o Anon Key no válidos. La URL debe comenzar con https://",
+      };
+    }
+
+    const testClient = createClient(targetUrl, targetKey);
+    // Probamos haciendo un select mínimo a la tabla profiles o auth
+    const { error } = await testClient.from("profiles").select("count", { count: "exact", head: true });
+
+    if (error) {
+      // Si la tabla profiles no existe aún pero la API respondió
+      if (error.code === "42P01" || error.message.includes("relation") || error.message.includes("does not exist")) {
+        return {
+          success: true,
+          message: "¡Conexión a Supabase exitosa! Nota: Las tablas aún no están creadas. Copia y ejecuta el script SQL abajo en el SQL Editor de Supabase.",
+        };
+      }
+      return {
+        success: false,
+        message: `Error al conectar con Supabase: ${error.message} (Código: ${error.code || "N/A"})`,
+      };
+    }
+
+    return {
+      success: true,
+      message: "¡Conexión a Supabase 100% activa y verificada! Tablas disponibles.",
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Fallo de conexión de red o credencial inválida: ${err.message || String(err)}`,
+    };
+  }
+}
+
+// Exporta el cliente activo de Supabase
+export const supabase = getSupabaseConfig().isConfigured
+  ? getRealSupabaseClient()
   : (mockSupabase as any);
+
+// Script SQL completo para que el usuario configure las tablas en Supabase con 1 clic
+export const SUPABASE_SQL_SETUP_SCRIPT = `-- =========================================================================
+-- ESQUEMA COMPLETO Y LISTO PARA EJECUTAR EN SUPABASE (J&A LEGAL)
+-- Instrucciones:
+-- 1. Ve a tu panel en https://supabase.com/dashboard
+-- 2. Entra a tu proyecto -> SQL Editor -> New Query
+-- 3. Pega todo este código y haz clic en "Run" (Ejecutar)
+-- =========================================================================
+
+-- 1. TABLA DE PERFILES DE USUARIO (Vinculada a auth.users)
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
+  email TEXT UNIQUE,
+  full_name TEXT NOT NULL,
+  initials TEXT,
+  role TEXT DEFAULT 'client' CHECK (role IN ('client', 'firm')),
+  id_number TEXT,
+  phone TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. TABLA DE EXPEDIENTES / PROCESOS JUDICIALES
+CREATE TABLE IF NOT EXISTS public.cases (
+  id TEXT PRIMARY KEY,
+  client_id TEXT,
+  client_email TEXT,
+  client_name TEXT,
+  radicado TEXT,
+  title TEXT NOT NULL,
+  process_type TEXT NOT NULL,
+  status TEXT DEFAULT 'Activo',
+  progress INTEGER DEFAULT 0,
+  balance NUMERIC DEFAULT 0,
+  total_fees NUMERIC DEFAULT 0,
+  authority TEXT,
+  city TEXT DEFAULT 'Bogotá D.C.',
+  lawyer TEXT,
+  observations TEXT,
+  current_phase TEXT,
+  last_update TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. TABLA DE AGENDA Y VENCIMIENTOS
+CREATE TABLE IF NOT EXISTS public.agenda_items (
+  id TEXT PRIMARY KEY,
+  case_id TEXT REFERENCES public.cases(id) ON DELETE CASCADE,
+  event_date TEXT NOT NULL,
+  event_time TEXT,
+  title TEXT NOT NULL,
+  detail TEXT,
+  type TEXT,
+  location TEXT,
+  virtual_link TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. TABLA DE HISTORIAL PROCESAL / ACTUACIONES
+CREATE TABLE IF NOT EXISTS public.history_items (
+  id TEXT PRIMARY KEY,
+  case_id TEXT REFERENCES public.cases(id) ON DELETE CASCADE,
+  event_date TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT,
+  note TEXT,
+  stage TEXT,
+  is_milestone BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. TABLA DE DOCUMENTOS DEL EXPEDIENTE DIGITAL
+CREATE TABLE IF NOT EXISTS public.documents (
+  id TEXT PRIMARY KEY,
+  case_id TEXT REFERENCES public.cases(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  category TEXT,
+  file_size TEXT,
+  uploaded_at TIMESTAMPTZ DEFAULT NOW(),
+  download_url TEXT,
+  status TEXT DEFAULT 'Oficial',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. TABLA DE CONTROL FINANCIERO Y HONORARIOS
+CREATE TABLE IF NOT EXISTS public.financial_records (
+  id TEXT PRIMARY KEY,
+  case_id TEXT,
+  client_id TEXT,
+  client_name TEXT,
+  type TEXT CHECK (type IN ('ingreso', 'egreso')),
+  category TEXT NOT NULL,
+  concept TEXT NOT NULL,
+  amount NUMERIC DEFAULT 0,
+  date TEXT,
+  status TEXT DEFAULT 'completado',
+  payment_method TEXT,
+  receipt_number TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. FUNCIÓN Y TRIGGER: CREAR PERFIL AUTOMÁTICO AL REGISTRARSE
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, initials, role, id_number, phone)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)),
+    UPPER(SUBSTRING(COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)), 1, 2)),
+    CASE WHEN LOWER(NEW.email) = 'eldavidprz@gmail.com' THEN 'firm' ELSE COALESCE(NEW.raw_user_meta_data->>'role', 'client') END,
+    COALESCE(NEW.raw_user_meta_data->>'id_number', ''),
+    COALESCE(NEW.raw_user_meta_data->>'phone', '')
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    full_name = EXCLUDED.full_name,
+    role = CASE WHEN LOWER(NEW.email) = 'eldavidprz@gmail.com' THEN 'firm' ELSE EXCLUDED.role END;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- 8. POLÍTICAS DE SEGURIDAD (RLS) HABILITADAS Y PERMISIVAS
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agenda_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.history_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.financial_records ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Acceso total profiles" ON public.profiles;
+CREATE POLICY "Acceso total profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Acceso total cases" ON public.cases;
+CREATE POLICY "Acceso total cases" ON public.cases FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Acceso total agenda" ON public.agenda_items;
+CREATE POLICY "Acceso total agenda" ON public.agenda_items FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Acceso total history" ON public.history_items;
+CREATE POLICY "Acceso total history" ON public.history_items FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Acceso total documents" ON public.documents;
+CREATE POLICY "Acceso total documents" ON public.documents FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Acceso total finances" ON public.financial_records;
+CREATE POLICY "Acceso total finances" ON public.financial_records FOR ALL USING (true) WITH CHECK (true);
+`;

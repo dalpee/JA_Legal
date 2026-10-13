@@ -253,7 +253,7 @@ export function CreateCaseModal({
                   required
                   value={clientEmail}
                   onChange={(e) => setClientEmail(e.target.value)}
-                  placeholder="ejemplo: cliente@jalegal.com.co"
+                  placeholder="ejemplo: cliente@correo.com"
                   style={{ width: "100%", padding: "8px 12px", background: "var(--ink-soft)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
                 />
               </div>
@@ -266,7 +266,7 @@ export function CreateCaseModal({
                   type="text"
                   value={clientName}
                   onChange={(e) => setClientName(e.target.value)}
-                  placeholder="Ej: Dr. Roberto Mendoza Vargas"
+                  placeholder="Ej: Carlos Alberto Gómez"
                   style={{ width: "100%", padding: "8px 12px", background: "var(--ink-soft)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
                 />
               </div>
