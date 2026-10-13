@@ -854,14 +854,23 @@ export const SUPABASE_SQL_SETUP_SCRIPT = `-- ===================================
 -- 1. TABLA DE PERFILES DE USUARIO (Vinculada a auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
-  email TEXT UNIQUE,
-  full_name TEXT NOT NULL,
+  email TEXT,
+  full_name TEXT,
   initials TEXT,
-  role TEXT DEFAULT 'client' CHECK (role IN ('client', 'firm')),
+  role TEXT DEFAULT 'client',
   id_number TEXT,
   phone TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Asegurar columnas si la tabla public.profiles ya existía previamente
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS initials TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'client';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS id_number TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 -- 2. TABLA DE EXPEDIENTES / PROCESOS JUDICIALES
 CREATE TABLE IF NOT EXISTS public.cases (
@@ -885,6 +894,25 @@ CREATE TABLE IF NOT EXISTS public.cases (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Asegurar columnas en cases por si ya existía
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS client_id TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS client_email TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS client_name TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS radicado TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS process_type TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Activo';
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS total_fees NUMERIC DEFAULT 0;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS authority TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS city TEXT DEFAULT 'Bogotá D.C.';
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS lawyer TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS observations TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS current_phase TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS last_update TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
 -- 3. TABLA DE AGENDA Y VENCIMIENTOS
 CREATE TABLE IF NOT EXISTS public.agenda_items (
   id TEXT PRIMARY KEY,
@@ -899,6 +927,16 @@ CREATE TABLE IF NOT EXISTS public.agenda_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE public.agenda_items ADD COLUMN IF NOT EXISTS case_id TEXT;
+ALTER TABLE public.agenda_items ADD COLUMN IF NOT EXISTS event_date TEXT;
+ALTER TABLE public.agenda_items ADD COLUMN IF NOT EXISTS event_time TEXT;
+ALTER TABLE public.agenda_items ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE public.agenda_items ADD COLUMN IF NOT EXISTS detail TEXT;
+ALTER TABLE public.agenda_items ADD COLUMN IF NOT EXISTS type TEXT;
+ALTER TABLE public.agenda_items ADD COLUMN IF NOT EXISTS location TEXT;
+ALTER TABLE public.agenda_items ADD COLUMN IF NOT EXISTS virtual_link TEXT;
+ALTER TABLE public.agenda_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
 -- 4. TABLA DE HISTORIAL PROCESAL / ACTUACIONES
 CREATE TABLE IF NOT EXISTS public.history_items (
   id TEXT PRIMARY KEY,
@@ -912,6 +950,15 @@ CREATE TABLE IF NOT EXISTS public.history_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE public.history_items ADD COLUMN IF NOT EXISTS case_id TEXT;
+ALTER TABLE public.history_items ADD COLUMN IF NOT EXISTS event_date TEXT;
+ALTER TABLE public.history_items ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE public.history_items ADD COLUMN IF NOT EXISTS detail TEXT;
+ALTER TABLE public.history_items ADD COLUMN IF NOT EXISTS note TEXT;
+ALTER TABLE public.history_items ADD COLUMN IF NOT EXISTS stage TEXT;
+ALTER TABLE public.history_items ADD COLUMN IF NOT EXISTS is_milestone BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.history_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
 -- 5. TABLA DE DOCUMENTOS DEL EXPEDIENTE DIGITAL
 CREATE TABLE IF NOT EXISTS public.documents (
   id TEXT PRIMARY KEY,
@@ -924,6 +971,15 @@ CREATE TABLE IF NOT EXISTS public.documents (
   status TEXT DEFAULT 'Oficial',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS case_id TEXT;
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS file_size TEXT;
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS download_url TEXT;
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Oficial';
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 -- 6. TABLA DE CONTROL FINANCIERO Y HONORARIOS
 CREATE TABLE IF NOT EXISTS public.financial_records (
@@ -943,6 +999,20 @@ CREATE TABLE IF NOT EXISTS public.financial_records (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS case_id TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS client_id TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS client_name TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS type TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS concept TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS amount NUMERIC DEFAULT 0;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS date TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completado';
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS payment_method TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS receipt_number TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
 -- 7. FUNCIÓN Y TRIGGER: CREAR PERFIL AUTOMÁTICO AL REGISTRARSE
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
@@ -958,7 +1028,8 @@ BEGIN
     COALESCE(NEW.raw_user_meta_data->>'phone', '')
   )
   ON CONFLICT (id) DO UPDATE SET
-    full_name = EXCLUDED.full_name,
+    email = EXCLUDED.email,
+    full_name = COALESCE(EXCLUDED.full_name, public.profiles.full_name),
     role = CASE WHEN LOWER(NEW.email) = 'eldavidprz@gmail.com' THEN 'firm' ELSE EXCLUDED.role END;
   RETURN NEW;
 END;
@@ -994,4 +1065,24 @@ CREATE POLICY "Acceso total documents" ON public.documents FOR ALL USING (true) 
 
 DROP POLICY IF EXISTS "Acceso total finances" ON public.financial_records;
 CREATE POLICY "Acceso total finances" ON public.financial_records FOR ALL USING (true) WITH CHECK (true);
+
+-- 9. SINCRONIZAR USUARIOS YA REGISTRADOS EN AUTH.USERS (Por si creaste tu cuenta antes de este script)
+INSERT INTO public.profiles (id, email, full_name, initials, role, id_number, phone)
+SELECT 
+  id,
+  email,
+  COALESCE(raw_user_meta_data->>'full_name', SPLIT_PART(email, '@', 1), 'Usuario'),
+  UPPER(SUBSTRING(COALESCE(raw_user_meta_data->>'full_name', SPLIT_PART(email, '@', 1), 'US'), 1, 2)),
+  CASE WHEN LOWER(email) = 'eldavidprz@gmail.com' THEN 'firm' ELSE COALESCE(raw_user_meta_data->>'role', 'client') END,
+  COALESCE(raw_user_meta_data->>'id_number', ''),
+  COALESCE(raw_user_meta_data->>'phone', '')
+FROM auth.users
+ON CONFLICT (id) DO UPDATE SET
+  email = EXCLUDED.email,
+  role = CASE WHEN LOWER(EXCLUDED.email) = 'eldavidprz@gmail.com' THEN 'firm' ELSE public.profiles.role END;
+
+-- 10. ASEGURAR PRIVILEGIOS DE SUPER ADMINISTRADOR PARA ELDAVIDPRZ@GMAIL.COM
+UPDATE public.profiles
+SET role = 'firm'
+WHERE LOWER(email) = 'eldavidprz@gmail.com';
 `;
