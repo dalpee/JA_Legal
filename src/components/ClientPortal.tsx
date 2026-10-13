@@ -393,9 +393,11 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
         if (lower.includes("invalid login credentials")) {
           msg = "Usuario no registrado o credenciales incorrectas. Verifique su correo o cree una cuenta nueva.";
         } else if (lower.includes("email not confirmed")) {
-          msg = "Correo no confirmado en Supabase. En el panel de Supabase active la casilla 'Auto Confirm User'.";
+          msg = "Correo no confirmado en Supabase. En Supabase -> Authentication -> Providers -> Email, desactiva 'Confirm email'.";
         } else if (lower.includes("invalid email")) {
           msg = "El formato del correo electrónico ingresado no es válido.";
+        } else if (lower.includes("rate limit") || lower.includes("rate_limit")) {
+          msg = "⚠️ Límite de correos de Supabase alcanzado ('email rate limit exceeded'). Supabase gratuito solo envía 3-4 correos por hora. En tu panel de Supabase ve a Authentication -> Providers -> Email y desactiva 'Confirm email' para no depender del envío de correos.";
         }
         setAuthError(msg);
       } else if (data?.session) {
@@ -440,7 +442,14 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       });
 
       if (error) {
-        setAuthError(error.message || "No se pudo crear la cuenta. Intente con otro correo.");
+        const lower = error.message.toLowerCase();
+        let msg = error.message;
+        if (lower.includes("rate limit") || lower.includes("rate_limit")) {
+          msg = "⚠️ Supabase 'email rate limit exceeded': El servidor gratuito de correo de Supabase superó su límite de 3 correos/hora. Solución rápida: En Supabase ve a Authentication -> Providers -> Email y desmarca 'Confirm email'. Así tu cuenta se activará al instante sin enviar correos.";
+        } else if (lower.includes("already registered") || lower.includes("user already exists")) {
+          msg = "Este correo ya está registrado en Supabase. Ve a 'Iniciar Sesión' e introduce tu contraseña.";
+        }
+        setAuthError(msg);
       } else {
         setAuthSuccess(`¡Usuario registrado con éxito como ${regRole === "firm" ? "Abogado" : "Cliente"}!`);
         if (data?.session) {
@@ -471,7 +480,12 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
       if (error) {
-        setAuthError(error.message || "No se pudo procesar la solicitud de recuperación.");
+        const lower = error.message.toLowerCase();
+        let msg = error.message;
+        if (lower.includes("rate limit") || lower.includes("rate_limit")) {
+          msg = "⚠️ Límite de correos superado ('email rate limit exceeded'): El servicio gratuito de Supabase solo permite 3 correos por hora. Para cambiar o definir tu contraseña sin esperar: En Supabase ve a Authentication -> Users, busca tu correo, haz clic en los 3 puntos (...) y selecciona 'Change password' o crea tu usuario con contraseña fija y 'Auto Confirm User' activo.";
+        }
+        setAuthError(msg);
       } else {
         const isDavid = email.trim().toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
         if (isDavid && !isConfiguredWithRealSupabase) {
@@ -480,7 +494,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
           );
         } else {
           setAuthSuccess(
-            `Se ha procesado la solicitud para ${email.trim()}. Si tu proyecto de Supabase tiene SMTP configurado, revisa tu bandeja de entrada o actualiza la contraseña directamente.`
+            `Se ha procesado la solicitud para ${email.trim()}. Revisa tu bandeja de entrada o actualiza la contraseña directamente en el panel de Supabase.`
           );
         }
       }
@@ -1702,6 +1716,27 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
             <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "8px" }}>
               {submitting ? "Verificando…" : "Recuperar / Consultar Clave"}
             </button>
+
+            <div
+              style={{
+                marginTop: "12px",
+                padding: "10px",
+                borderRadius: "4px",
+                background: "rgba(234, 179, 8, 0.08)",
+                border: "1px solid rgba(234, 179, 8, 0.25)",
+                fontSize: "0.74rem",
+                color: "var(--text-muted)",
+                lineHeight: 1.4,
+              }}
+            >
+              <strong style={{ color: "#facc15", display: "block", marginBottom: "4px" }}>
+                💡 ¿Aparece &apos;email rate limit exceeded&apos;?
+              </strong>
+              <span>
+                Supabase gratuito limita el envío a 3 correos por hora. Puedes cambiar o fijar la contraseña de cualquier usuario directamente en tu panel de Supabase:
+                <strong style={{ color: "var(--text-bright)" }}> Authentication → Users → tres puntos (…) → &quot;Change password&quot;</strong>, o crear el usuario con &quot;Auto Confirm User&quot; activo.
+              </span>
+            </div>
 
             <button
               type="button"
