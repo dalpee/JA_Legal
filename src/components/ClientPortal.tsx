@@ -14,6 +14,7 @@ import {
   getStoredFinances,
   saveStoredFinances,
   resetAllToDefault,
+  isConfiguredWithRealSupabase,
 } from "../lib/supabaseClient";
 import { defaultProfile, firmProfile, caseTemplates } from "../data/initialData";
 import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem, FinancialRecord } from "../types/portal";
@@ -23,6 +24,7 @@ import { DocumentModal } from "./DocumentModal";
 import { FinanceSection } from "./FinanceSection";
 import { LegalCalculator } from "./LegalCalculator";
 import { SystemArchitectureModal } from "./SystemArchitectureModal";
+import { ThemeToggle } from "./ThemeToggle";
 import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText } from "./icons";
 import "./ClientPortal.css";
 
@@ -423,6 +425,8 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               </span>
             </div>
 
+            <ThemeToggle />
+
             {isFirm && (
               <button
                 type="button"
@@ -614,9 +618,28 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               <span>📐 Especificación & Auditoría</span>
             </button>
 
-            <p className="portal-private">
-              Sesión verificada con Supabase Auth
-            </p>
+            <div
+              style={{
+                padding: "8px 10px",
+                borderRadius: "4px",
+                background: isConfiguredWithRealSupabase ? "rgba(34, 197, 94, 0.12)" : "rgba(234, 179, 8, 0.12)",
+                border: `1px solid ${isConfiguredWithRealSupabase ? "rgba(34, 197, 94, 0.35)" : "rgba(234, 179, 8, 0.35)"}`,
+                fontSize: "0.72rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <span style={{ fontSize: "0.85rem" }}>{isConfiguredWithRealSupabase ? "🟢" : "🟠"}</span>
+              <div>
+                <strong style={{ color: isConfiguredWithRealSupabase ? "#4ade80" : "#facc15", display: "block" }}>
+                  {isConfiguredWithRealSupabase ? "Supabase Cloud: Conectado" : "Supabase: Modo Local"}
+                </strong>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>
+                  {isConfiguredWithRealSupabase ? "PostgreSQL activo en la nube" : "Sin variables .env (Autónomo)"}
+                </span>
+              </div>
+            </div>
           </aside>
 
           <section className="portal-content" id="resumen">
@@ -1023,9 +1046,12 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   // ==========================================
   return (
     <main className="client-portal login-view">
-      <button type="button" onClick={handleBack} className="portal-back login-back">
-        ← Volver a la página principal
-      </button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: "440px", marginBottom: "16px" }}>
+        <button type="button" onClick={handleBack} className="portal-back login-back" style={{ margin: 0 }}>
+          ← Volver a la página principal
+        </button>
+        <ThemeToggle />
+      </div>
 
       <section className="portal-card login-card" style={{ maxWidth: "440px" }}>
         <img src={logo} alt="Jiménez &amp; Ariza Asociados" className="portal-logo" />
@@ -1160,7 +1186,32 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
           </form>
         )}
 
-        <div style={{ marginTop: "20px", paddingTop: "14px", borderTop: "1px solid var(--line)", textAlign: "left" }}>
+        <div style={{ marginTop: "18px", paddingTop: "14px", borderTop: "1px solid var(--line)", textAlign: "left" }}>
+          {/* Indicador de Estado de Conexión a Supabase */}
+          <div
+            style={{
+              padding: "7px 10px",
+              borderRadius: "4px",
+              marginBottom: "12px",
+              background: isConfiguredWithRealSupabase ? "rgba(34, 197, 94, 0.12)" : "rgba(234, 179, 8, 0.12)",
+              border: `1px solid ${isConfiguredWithRealSupabase ? "rgba(34, 197, 94, 0.35)" : "rgba(234, 179, 8, 0.35)"}`,
+              fontSize: "0.72rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <span style={{ fontSize: "0.85rem" }}>{isConfiguredWithRealSupabase ? "🟢" : "🟠"}</span>
+            <div>
+              <strong style={{ color: isConfiguredWithRealSupabase ? "#4ade80" : "#facc15", display: "block" }}>
+                {isConfiguredWithRealSupabase ? "Base de Datos Supabase: Conectada" : "Modo Autónomo Local Activo"}
+              </strong>
+              <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>
+                {isConfiguredWithRealSupabase ? "Conexión a la nube PostgreSQL verificada" : "Usando almacenamiento seguro local (.env opcional)"}
+              </span>
+            </div>
+          </div>
+
           <p style={{ margin: "0 0 6px", fontSize: "0.72rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
             Cuentas habilitadas por defecto:
           </p>

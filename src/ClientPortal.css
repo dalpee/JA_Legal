@@ -18,6 +18,25 @@
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+:root[data-theme="light"],
+[data-theme="light"],
+html.light,
+body.theme-light {
+  --ink: #f8fafc;
+  --ink-soft: #f1f5f9;
+  --ink-panel: #ffffff;
+  --parchment: #f8fafc;
+  --parchment-deep: #ffffff;
+  --brass: #b38234;
+  --brass-light: #946927;
+  --brass-deep: #7a551e;
+  --line: rgba(15, 23, 42, 0.12);
+  --text: #334155;
+  --text-muted: #64748b;
+  --text-bright: #0f172a;
+  --sage: #2e7d52;
+}
+
 .portal-dashboard,
 .client-portal {
   font-family: var(--font-sans);

@@ -1,4 +1,4 @@
-/* J&A Legal - Main Website Stylesheet matching image.png */
+/* J&A Legal - Main Website Stylesheet */
 
 :root {
   --ink: #0c1526;
@@ -14,8 +14,34 @@
   --text-muted: #8891a3;
   --text-bright: #f4f1e8;
   --sage: #7fae8f;
+  --nav-bg: rgba(12, 21, 38, 0.94);
+  --grid-line: rgba(255, 255, 255, 0.035);
+  --shadow-card: rgba(0, 0, 0, 0.45);
   --font-serif: "Source Serif 4", Georgia, serif;
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Light Theme Variables */
+:root[data-theme="light"],
+[data-theme="light"],
+html.light,
+body.theme-light {
+  --ink: #f8fafc;
+  --ink-soft: #f1f5f9;
+  --ink-panel: #ffffff;
+  --parchment: #f8fafc;
+  --parchment-deep: #ffffff;
+  --brass: #b38234;
+  --brass-light: #946927;
+  --brass-deep: #7a551e;
+  --line: rgba(15, 23, 42, 0.12);
+  --text: #334155;
+  --text-muted: #64748b;
+  --text-bright: #0f172a;
+  --sage: #2e7d52;
+  --nav-bg: rgba(248, 250, 252, 0.96);
+  --grid-line: rgba(15, 23, 42, 0.05);
+  --shadow-card: rgba(15, 23, 42, 0.08);
 }
 
 html {
@@ -29,6 +55,7 @@ body {
   color: var(--text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 /* Layout Utilities */
@@ -130,9 +157,10 @@ p {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(12, 21, 38, 0.94);
+  background: var(--nav-bg);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
+  transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
 .navwrap {
@@ -153,10 +181,29 @@ p {
   width: auto;
 }
 
+/* Light Theme Logo Adaptation */
+[data-theme="light"] .brand .logo text[fill="#f4f1e8"],
+html.light .brand .logo text[fill="#f4f1e8"],
+body.theme-light .brand .logo text[fill="#f4f1e8"] {
+  fill: #0f172a !important;
+}
+
+[data-theme="light"] .brand .logo text[fill="#8891a3"],
+html.light .brand .logo text[fill="#8891a3"],
+body.theme-light .brand .logo text[fill="#8891a3"] {
+  fill: #475569 !important;
+}
+
+.nav-right-cluster {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .nav {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 22px;
 }
 
 .nav a {
@@ -178,7 +225,62 @@ p {
 
 .navcta.portal-btn {
   background: var(--brass);
-  color: var(--ink);
+  color: #0c1526;
+  font-weight: 600;
+}
+
+/* Theme Toggle Button */
+.theme-toggle-btn {
+  background: var(--ink-soft);
+  border: 1px solid var(--line);
+  color: var(--text-bright);
+  padding: 5px 12px;
+  border-radius: 9999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  transition: all 0.25s ease;
+  user-select: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.theme-toggle-btn:hover {
+  border-color: var(--brass);
+  background: var(--ink-panel);
+  transform: translateY(-1px);
+}
+
+.theme-toggle-track {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--parchment-deep);
+  border: 1px solid var(--line);
+  transition: all 0.2s ease;
+}
+
+.theme-toggle-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.theme-toggle-label {
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.theme-toggle-btn:hover .theme-toggle-label {
+  color: var(--text-bright);
 }
 
 .menu {
@@ -192,17 +294,17 @@ p {
   cursor: pointer;
 }
 
-/* ==================== HERO SECTION (as shown in image.png) ==================== */
+/* ==================== HERO SECTION ==================== */
 .hero {
   position: relative;
   background-color: var(--ink);
-  /* The subtle technical blue grid seen in image.png */
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
   background-size: 48px 48px;
   padding: 80px 0 110px;
   overflow: hidden;
+  transition: background-color 0.25s ease;
 }
 
 .hero::after {
