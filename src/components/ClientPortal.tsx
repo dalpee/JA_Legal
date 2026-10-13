@@ -93,6 +93,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [activeSection, setActiveSection] = useState<
     "resumen" | "proceso" | "agenda" | "documentos" | "historial" | "economia" | "calculadora" | "admin"
   >("resumen");
+  const [adminSubTab, setAdminSubTab] = useState<"casos" | "clientes" | "conexion_supabase">("casos");
 
   // Estados de modales y herramientas
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -590,21 +591,45 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
             </div>
 
             <nav className="portal-menu" aria-label="Portal de clientes">
-              {/* Pestaña: Panel Admin & Asignación de Casos (Solo Abogados) */}
+              {/* Pestañas de Administración para Abogados */}
               {isFirm && (
-                <button
-                  type="button"
-                  className={activeSection === "admin" ? "active" : ""}
-                  onClick={() => setActiveSection("admin")}
-                  style={{
-                    borderLeft: activeSection === "admin" ? "3px solid var(--brass)" : "none",
-                    background: activeSection === "admin" ? "rgba(217, 181, 106, 0.18)" : "rgba(217, 181, 106, 0.05)",
-                    fontWeight: 700,
-                  }}
-                >
-                  <span>⚖️ Panel Admin & Clientes</span>
-                  <small style={{ color: "var(--brass-light)", fontWeight: 700 }}>{allCases.length} casos</small>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className={activeSection === "admin" && adminSubTab === "casos" ? "active" : ""}
+                    onClick={() => {
+                      setActiveSection("admin");
+                      setAdminSubTab("casos");
+                    }}
+                    style={{
+                      borderLeft: activeSection === "admin" && adminSubTab === "casos" ? "3px solid var(--brass)" : "none",
+                      background: activeSection === "admin" && adminSubTab === "casos" ? "rgba(217, 181, 106, 0.18)" : "rgba(217, 181, 106, 0.05)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    <span>⚖️ Gestión de Casos</span>
+                    <small style={{ color: "var(--brass-light)", fontWeight: 700 }}>{allCases.length} casos</small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={activeSection === "admin" && adminSubTab === "clientes" ? "active" : ""}
+                    onClick={() => {
+                      setActiveSection("admin");
+                      setAdminSubTab("clientes");
+                    }}
+                    style={{
+                      borderLeft: activeSection === "admin" && adminSubTab === "clientes" ? "3px solid #38bdf8" : "none",
+                      background: activeSection === "admin" && adminSubTab === "clientes" ? "rgba(56, 189, 248, 0.18)" : "rgba(56, 189, 248, 0.05)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    <span>👥 Directorio de Clientes</span>
+                    <small style={{ color: "#38bdf8", fontWeight: 700 }}>
+                      {registeredUsersList.length > 0 ? registeredUsersList.length : getStoredUsers().length} usuarios
+                    </small>
+                  </button>
+                </>
               )}
 
               <button
@@ -697,10 +722,13 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                   <button
                     type="button"
-                    onClick={() => setActiveSection("admin")}
+                    onClick={() => {
+                      setActiveSection("admin");
+                      setAdminSubTab("casos");
+                    }}
                     style={{
                       padding: "8px 12px",
-                      background: activeSection === "admin" ? "rgba(217, 181, 106, 0.25)" : "transparent",
+                      background: activeSection === "admin" && adminSubTab === "casos" ? "rgba(217, 181, 106, 0.25)" : "transparent",
                       color: "var(--brass-light)",
                       border: "1px solid var(--brass)",
                       fontWeight: 600,
@@ -713,7 +741,31 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                       gap: "6px",
                     }}
                   >
-                    <span>📊 Gestionar Todos los Casos</span>
+                    <span>📊 Gestionar Casos ({allCases.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSection("admin");
+                      setAdminSubTab("clientes");
+                    }}
+                    style={{
+                      padding: "8px 12px",
+                      background: activeSection === "admin" && adminSubTab === "clientes" ? "rgba(56, 189, 248, 0.25)" : "transparent",
+                      color: "#38bdf8",
+                      border: "1px solid rgba(56, 189, 248, 0.45)",
+                      fontWeight: 600,
+                      fontSize: "0.8rem",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <span>👥 Directorio de Clientes & IDs</span>
                   </button>
 
                   <button
@@ -842,6 +894,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
             {/* SECCIÓN ADMIN: PANEL DE ADMINISTRACIÓN Y ASIGNACIÓN DE CASOS */}
             {isFirm && activeSection === "admin" && (
               <AdminDashboard
+                initialTab={adminSubTab}
                 allCases={allCases}
                 onSelectCase={(selected) => {
                   setCaseRecord(selected);

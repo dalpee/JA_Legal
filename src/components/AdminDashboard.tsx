@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { CaseRecord } from "../types/portal";
 import {
   StoredUser,
@@ -22,6 +22,7 @@ interface AdminDashboardProps {
   onNavigateToSection: (section: "resumen" | "proceso" | "agenda" | "documentos" | "historial" | "economia") => void;
   onRefreshUsers?: () => void;
   onRefreshCases?: () => void;
+  initialTab?: "casos" | "clientes" | "conexion_supabase";
 }
 
 export function AdminDashboard({
@@ -34,14 +35,23 @@ export function AdminDashboard({
   onNavigateToSection,
   onRefreshUsers,
   onRefreshCases,
+  initialTab = "casos",
 }: AdminDashboardProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchField, setSearchField] = useState<"all" | "client_name" | "client_id">("all");
   const [selectedBranchFilter, setSelectedBranchFilter] = useState("all");
-  const [activeTab, setActiveTab] = useState<"casos" | "clientes" | "conexion_supabase">("casos");
+  const [activeTab, setActiveTab] = useState<"casos" | "clientes" | "conexion_supabase">(initialTab);
+  const [userSearchTerm, setUserSearchTerm] = useState("");
+  const [userRoleFilter, setUserRoleFilter] = useState<"all" | "client" | "firm">("all");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Estados para crear un nuevo usuario desde el AdminDashboard
   const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
@@ -200,6 +210,30 @@ export function AdminDashboard({
       return matchSearch && matchBranch;
     });
   }, [allCases, searchTerm, searchField, selectedBranchFilter, registeredUsers]);
+
+  // Filtrado de usuarios y clientes
+  const filteredUsers = useMemo(() => {
+    return registeredUsers.filter((u) => {
+      const term = userSearchTerm.trim().toLowerCase();
+      const matchRole = userRoleFilter === "all" || u.role === userRoleFilter;
+      if (!term) return matchRole;
+
+      const name = (u.full_name || "").toLowerCase();
+      const email = (u.email || "").toLowerCase();
+      const id = (u.id || "").toLowerCase();
+      const doc = (u.id_number || "").toLowerCase();
+      const phone = (u.phone || "").toLowerCase();
+
+      const matchTerm =
+        name.includes(term) ||
+        email.includes(term) ||
+        id.includes(term) ||
+        doc.includes(term) ||
+        phone.includes(term);
+
+      return matchRole && matchTerm;
+    });
+  }, [registeredUsers, userSearchTerm, userRoleFilter]);
 
   // Cálculos estadísticos
   const totalFees = allCases.reduce((acc, c) => acc + (Number(c.total_fees) || 0), 0);
@@ -1106,9 +1140,116 @@ export function AdminDashboard({
             </div>
           )}
 
+          {/* Barra de Búsqueda y Filtro de Usuarios */}
+          <div
+            style={{
+              background: "var(--ink-soft)",
+              border: "1px solid var(--line)",
+              borderRadius: "6px",
+              padding: "12px 16px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "12px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1 1 300px" }}>
+              <input
+                type="text"
+                value={userSearchTerm}
+                onChange={(e) => setUserSearchTerm(e.target.value)}
+                placeholder="🔍 Buscar cliente por nombre, correo, cédula o ID de Supabase…"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  background: "var(--parchment-deep)",
+                  border: "1px solid var(--line)",
+                  borderRadius: "4px",
+                  color: "var(--text-bright)",
+                  fontSize: "0.85rem",
+                }}
+              />
+              {userSearchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setUserSearchTerm("")}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                    fontSize: "0.8rem",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ✕ Limpiar
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <select
+                value={userRoleFilter}
+                onChange={(e) => setUserRoleFilter(e.target.value as any)}
+                style={{
+                  padding: "8px 12px",
+                  background: "var(--parchment-deep)",
+                  border: "1px solid var(--line)",
+                  borderRadius: "4px",
+                  color: "var(--text-bright)",
+                  fontSize: "0.82rem",
+                }}
+              >
+                <option value="all">Todos los Roles ({registeredUsers.length})</option>
+                <option value="client">👤 Clientes ({registeredUsers.filter((u) => u.role === "client").length})</option>
+                <option value="firm">⚖️ Abogados ({registeredUsers.filter((u) => u.role === "firm").length})</option>
+              </select>
+
+              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                Mostrando {filteredUsers.length} de {registeredUsers.length}
+              </span>
+            </div>
+          </div>
+
           {/* Directorio de Cuentas en Tarjetas */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px" }}>
-            {registeredUsers.map((u) => {
+          {filteredUsers.length === 0 ? (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "36px 20px",
+                background: "var(--parchment-deep)",
+                border: "1px dashed var(--line)",
+                borderRadius: "6px",
+                color: "var(--text-muted)",
+              }}
+            >
+              <p style={{ margin: "0 0 10px", fontSize: "0.95rem" }}>
+                No se encontraron usuarios o clientes con el término <strong>"{userSearchTerm}"</strong>.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setUserSearchTerm("");
+                  setUserRoleFilter("all");
+                }}
+                style={{
+                  background: "var(--brass)",
+                  color: "var(--ink)",
+                  fontWeight: 600,
+                  fontSize: "0.8rem",
+                  padding: "6px 14px",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                }}
+              >
+                Restablecer filtros
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px" }}>
+              {filteredUsers.map((u) => {
               const isSuper = u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
               const clientCases = allCases.filter(
                 (c) => c.client_id === u.id || (c.client_email && c.client_email.toLowerCase() === u.email.toLowerCase())
@@ -1251,8 +1392,9 @@ export function AdminDashboard({
               );
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+    )}
 
       {/* ======================================================== */}
       {/* PESTAÑA 3: CONEXIÓN SUPABASE & SQL (NUBE POSTGRESQL)      */}
