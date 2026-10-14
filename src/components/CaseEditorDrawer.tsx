@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { CaseRecord, AgendaItem, HistoryItem, DocumentItem, Profile } from "../types/portal";
 import { caseTemplates } from "../data/initialData";
+import { syncDocumentToDatabase, deleteDocumentFromDatabase } from "../lib/supabaseClient";
 import {
   X,
   Sliders,
@@ -150,6 +151,7 @@ export function CaseEditorDrawer({
       uploaded_at: new Date().toISOString().split("T")[0],
       status: "Oficial",
     };
+    syncDocumentToDatabase(newItem).catch((err) => console.warn("Supabase doc sync notice:", err));
     const nextDocs = [newItem, ...documents];
     onUpdateDocuments(nextDocs);
     handleCaseChange("documents_count", nextDocs.length);
@@ -158,6 +160,7 @@ export function CaseEditorDrawer({
   };
 
   const handleDeleteDocument = (id: string) => {
+    deleteDocumentFromDatabase(id).catch((err) => console.warn("Supabase doc delete notice:", err));
     const nextDocs = documents.filter((doc) => doc.id !== id);
     onUpdateDocuments(nextDocs);
     handleCaseChange("documents_count", nextDocs.length);

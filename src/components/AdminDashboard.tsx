@@ -3,12 +3,18 @@ import { CaseRecord } from "../types/portal";
 import {
   StoredUser,
   SUPER_ADMIN_EMAIL,
+  ADMIN_1_EMAIL,
+  ADMIN_2_EMAIL,
+  canCreateAccounts,
   createUserAccount,
   deleteUserAccount,
   getSupabaseConfig,
   saveSupabaseConfig,
   clearSupabaseConfig,
   testSupabaseConnection,
+  syncAllLocalDataToSupabase,
+  syncDocumentToDatabase,
+  saveStoredCase,
   SUPABASE_SQL_SETUP_SCRIPT,
 } from "../lib/supabaseClient";
 
@@ -23,6 +29,7 @@ interface AdminDashboardProps {
   onRefreshUsers?: () => void;
   onRefreshCases?: () => void;
   initialTab?: "casos" | "clientes" | "conexion_supabase";
+  currentUser?: { email?: string | null; role?: string } | null;
 }
 
 export function AdminDashboard({
@@ -36,6 +43,7 @@ export function AdminDashboard({
   onRefreshUsers,
   onRefreshCases,
   initialTab = "casos",
+  currentUser,
 }: AdminDashboardProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchField, setSearchField] = useState<"all" | "client_name" | "client_id">("all");
@@ -46,6 +54,9 @@ export function AdminDashboard({
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+
+  // Validación estricta: solo Super Admin y los 2 Administradores de la firma pueden crear cuentas
+  const userCanCreate = canCreateAccounts(currentUser);
 
   useEffect(() => {
     if (initialTab) {
@@ -70,6 +81,21 @@ export function AdminDashboard({
   const [supabaseKeyInput, setSupabaseKeyInput] = useState(currentCfg.anonKey);
   const [connectionTesting, setConnectionTesting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<{ tested: boolean; success: boolean; message: string } | null>(null);
+
+  // Estados para sincronización masiva de datos locales a Supabase
+  const [isSyncingAllData, setIsSyncingAllData] = useState(false);
+  const [syncAllFeedback, setSyncAllFeedback] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Estados para agregar documentos a los casos directamente desde el Dashboard
+  const [activeCaseForDocModal, setActiveCaseForDocModal] = useState<CaseRecord | null>(null);
+  const [docModalTitle, setDocModalTitle] = useState("");
+  const [docModalCategory, setDocModalCategory] = useState("Auto / Providencia");
+  const [docModalStatus, setDocModalStatus] = useState("Oficial");
+  const [docModalFileName, setDocModalFileName] = useState("");
+  const [docModalFileSize, setDocModalFileSize] = useState("");
+  const [docModalDataUrl, setDocModalDataUrl] = useState<string | null>(null);
+  const [docModalUploading, setDocModalUploading] = useState(false);
+  const [docModalFeedback, setDocModalFeedback] = useState<string | null>(null);
 
   // Copiar ID de usuario al portapapeles
   const handleCopyId = (id: string) => {
@@ -112,10 +138,88 @@ export function AdminDashboard({
     }
   };
 
+  // Sincronizar todos los datos guardados en Vercel/Local directamente a Supabase
+  const handleSyncAllData = async () => {
+    setIsSyncingAllData(true);
+    setSyncAllFeedback(null);
+    try {
+      const res = await syncAllLocalDataToSupabase();
+      setSyncAllFeedback({ success: res.success, message: res.message });
+      if (onRefreshCases) onRefreshCases();
+      if (onRefreshUsers) onRefreshUsers();
+    } catch (err: any) {
+      setSyncAllFeedback({
+        success: false,
+        message: err.message || "Error al sincronizar datos a Supabase",
+      });
+    } finally {
+      setIsSyncingAllData(false);
+    }
+  };
+
+  // Manejar incorporación de documento a un caso
+  const handleAdminAddDocSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeCaseForDocModal || !docModalTitle.trim()) return;
+    setDocModalUploading(true);
+    setDocModalFeedback(null);
+    try {
+      const finalName = docModalFileName
+        ? docModalTitle.trim()
+        : docModalTitle.trim().endsWith(".pdf")
+        ? docModalTitle.trim()
+        : `${docModalTitle.trim()}.pdf`;
+
+      const newDoc = {
+        id: "doc_" + Date.now(),
+        case_id: activeCaseForDocModal.id,
+        name: finalName,
+        category: docModalCategory,
+        file_size: docModalFileSize || "1.2 MB",
+        uploaded_at: new Date().toISOString().split("T")[0],
+        status: docModalStatus || "Oficial",
+        download_url: docModalDataUrl || undefined,
+      };
+
+      await syncDocumentToDatabase(newDoc);
+
+      const updatedCase: CaseRecord = {
+        ...activeCaseForDocModal,
+        documents_count: (activeCaseForDocModal.documents_count || 0) + 1,
+      };
+      saveStoredCase(updatedCase);
+      if (onRefreshCases) onRefreshCases();
+
+      setDocModalFeedback("¡Documento incorporado exitosamente al expediente en Supabase!");
+      setTimeout(() => {
+        setActiveCaseForDocModal(null);
+        setDocModalTitle("");
+        setDocModalFileName("");
+        setDocModalFileSize("");
+        setDocModalDataUrl(null);
+        setDocModalFeedback(null);
+      }, 1200);
+    } catch (err: any) {
+      setDocModalFeedback("Error: " + (err.message || String(err)));
+    } finally {
+      setDocModalUploading(false);
+    }
+  };
+
   // Manejar creación de nuevo usuario
   const handleCreateUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setUserCreationFeedback(null);
+
+    // Verificación estricta: solo Super Admin y los 2 Administradores autorizados
+    if (!userCanCreate) {
+      setUserCreationFeedback({
+        type: "error",
+        text: `Acceso restringido: Solo el Super Admin (${SUPER_ADMIN_EMAIL}) y los 2 Socios Administradores (${ADMIN_1_EMAIL}, ${ADMIN_2_EMAIL}) pueden crear nuevas cuentas.`,
+      });
+      return;
+    }
+
     if (!newEmail.trim() || !newFullName.trim()) {
       setUserCreationFeedback({ type: "error", text: "El correo y el nombre completo son obligatorios." });
       return;
@@ -123,14 +227,17 @@ export function AdminDashboard({
 
     setUserCreationLoading(true);
     try {
-      const res = await createUserAccount({
-        email: newEmail.trim(),
-        password: newPassword,
-        full_name: newFullName.trim(),
-        role: newRole,
-        id_number: newIdNumber.trim(),
-        phone: newPhone.trim(),
-      });
+      const res = await createUserAccount(
+        {
+          email: newEmail.trim(),
+          password: newPassword,
+          full_name: newFullName.trim(),
+          role: newRole,
+          id_number: newIdNumber.trim(),
+          phone: newPhone.trim(),
+        },
+        currentUser
+      );
 
       if (res.success) {
         setUserCreationFeedback({
@@ -771,6 +878,30 @@ export function AdminDashboard({
                           <div style={{ display: "inline-flex", gap: "6px" }}>
                             <button
                               type="button"
+                              onClick={() => {
+                                setActiveCaseForDocModal(c);
+                                setDocModalTitle("");
+                                setDocModalFileName("");
+                                setDocModalFileSize("");
+                                setDocModalDataUrl(null);
+                                setDocModalFeedback(null);
+                              }}
+                              style={{
+                                background: "rgba(217, 181, 106, 0.15)",
+                                border: "1px solid var(--brass)",
+                                color: "var(--brass-light)",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                fontSize: "0.72rem",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                              title="Subir / Agregar documento a este proceso"
+                            >
+                              📎 + Doc ({c.documents_count || 0})
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => onSelectCase(c)}
                               style={{
                                 background: "rgba(56, 189, 248, 0.1)",
@@ -856,6 +987,21 @@ export function AdminDashboard({
                           {c.process_type}
                         </span>
                         <div style={{ display: "flex", gap: "6px" }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveCaseForDocModal(c);
+                              setDocModalTitle("");
+                              setDocModalFileName("");
+                              setDocModalFileSize("");
+                              setDocModalDataUrl(null);
+                              setDocModalFeedback(null);
+                            }}
+                            style={{ background: "rgba(217, 181, 106, 0.15)", border: "1px solid var(--brass)", color: "var(--brass-light)", padding: "3px 8px", borderRadius: "3px", fontSize: "0.7rem", cursor: "pointer", fontWeight: 600 }}
+                            title="Agregar documento a este expediente"
+                          >
+                            📎 + Doc ({c.documents_count || 0})
+                          </button>
                           <button
                             type="button"
                             onClick={() => onEditCase(c)}
@@ -968,30 +1114,48 @@ export function AdminDashboard({
                 Directorio de Usuarios & Cuentas Registradas ({registeredUsers.length})
               </h3>
               <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                Cuentas activas en la base de datos. Como Super Admin (<strong>{SUPER_ADMIN_EMAIL}</strong>) puede crear nuevos usuarios y asignar expedientes.
+                <strong style={{ color: "var(--brass)" }}>Acceso de Creación Restringido:</strong> Solo el Super Admin Titular (<strong>{SUPER_ADMIN_EMAIL}</strong>) y los 2 Administradores de la firma pueden crear cuentas en el sistema.
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setIsCreateUserModalOpen(true)}
-              style={{
-                background: "var(--brass)",
-                color: "var(--ink)",
-                fontWeight: 700,
-                fontSize: "0.85rem",
-                padding: "10px 18px",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                boxShadow: "0 2px 10px rgba(217, 181, 106, 0.25)",
-              }}
-            >
-              <span>+ Crear Nueva Cuenta</span>
-            </button>
+            {userCanCreate ? (
+              <button
+                type="button"
+                onClick={() => setIsCreateUserModalOpen(true)}
+                style={{
+                  background: "var(--brass)",
+                  color: "var(--ink)",
+                  fontWeight: 700,
+                  fontSize: "0.85rem",
+                  padding: "10px 18px",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  boxShadow: "0 2px 10px rgba(217, 181, 106, 0.25)",
+                }}
+              >
+                <span>+ Crear Nueva Cuenta</span>
+              </button>
+            ) : (
+              <div
+                style={{
+                  background: "rgba(239, 68, 68, 0.12)",
+                  border: "1px solid rgba(239, 68, 68, 0.35)",
+                  color: "#f87171",
+                  padding: "8px 14px",
+                  borderRadius: "4px",
+                  fontSize: "0.78rem",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <span>🔒 Creación restringida (Solo Super Admin {SUPER_ADMIN_EMAIL} y los 2 Admins de la firma)</span>
+              </div>
+            )}
           </div>
 
           {/* Formulario Modal / En línea para Crear Nuevo Usuario */}
@@ -1422,8 +1586,39 @@ export function AdminDashboard({
               </h3>
               <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text)", maxWidth: "700px" }}>
                 Obtenga estos dos datos en su panel de Supabase: vaya a <strong>Project Settings → API</strong>.
-                Al ingresarlos y guardar, los casos y las cuentas se almacenarán permanentemente en su nube de Supabase.
+                Al ingresarlos y guardar, los casos, documentos y cuentas se almacenarán permanentemente en su base de datos PostgreSQL de Supabase.
               </p>
+            </div>
+
+            {/* Aviso especial para despliegues en Vercel */}
+            <div
+              style={{
+                background: "rgba(56, 189, 248, 0.08)",
+                border: "1px solid rgba(56, 189, 248, 0.3)",
+                padding: "14px 16px",
+                borderRadius: "6px",
+                fontSize: "0.8rem",
+                color: "var(--text)",
+                lineHeight: 1.5,
+              }}
+            >
+              <strong style={{ color: "#38bdf8", display: "block", marginBottom: "4px" }}>
+                🚀 ¿Por qué no se guardaban los datos de Vercel en la base de datos?
+              </strong>
+              <span>
+                Vercel compila tu proyecto en sus servidores. Para que Vercel se comunique con Supabase, <strong>debes configurar las variables en tu panel de Vercel</strong>:
+              </span>
+              <ol style={{ margin: "6px 0 0", paddingLeft: "18px", fontSize: "0.78rem" }}>
+                <li>Abre tu proyecto en <strong><a href="https://vercel.com/dashboard" target="_blank" rel="noreferrer" style={{ color: "#38bdf8" }}>https://vercel.com/dashboard</a></strong>.</li>
+                <li>Ve a <strong>Settings → Environment Variables</strong>.</li>
+                <li>Agrega dos variables:
+                  <ul style={{ marginTop: "3px" }}>
+                    <li><code>VITE_SUPABASE_URL</code> con el valor de tu Project URL.</li>
+                    <li><code>VITE_SUPABASE_ANON_KEY</code> con el valor de tu Project API Key (anon/public).</li>
+                  </ul>
+                </li>
+                <li>Ve a la pestaña <strong>Deployments</strong>, haz clic en los tres puntos (…) de tu último despliegue y selecciona <strong>Redeploy</strong>.</li>
+              </ol>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "14px" }}>
@@ -1513,6 +1708,29 @@ export function AdminDashboard({
                 {connectionTesting ? "Verificando con Supabase…" : "💾 Guardar Credenciales & Probar Conexión"}
               </button>
 
+              <button
+                type="button"
+                disabled={isSyncingAllData}
+                onClick={handleSyncAllData}
+                style={{
+                  background: "#0284c7",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: "0.85rem",
+                  padding: "10px 22px",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  boxShadow: "0 2px 8px rgba(2, 132, 199, 0.35)",
+                }}
+                title="Pasa todos los procesos, documentos y usuarios que tengas al servidor Supabase"
+              >
+                <span>{isSyncingAllData ? "Sincronizando a Supabase…" : "🚀 Sincronizar Todos los Datos a Supabase"}</span>
+              </button>
+
               {isSupabaseLive && (
                 <button
                   type="button"
@@ -1539,6 +1757,22 @@ export function AdminDashboard({
                 </button>
               )}
             </div>
+
+            {syncAllFeedback && (
+              <div
+                style={{
+                  padding: "12px 16px",
+                  borderRadius: "6px",
+                  fontSize: "0.85rem",
+                  background: syncAllFeedback.success ? "rgba(34, 197, 94, 0.12)" : "rgba(239, 68, 68, 0.12)",
+                  border: `1px solid ${syncAllFeedback.success ? "#22c55e" : "#ef4444"}`,
+                  color: syncAllFeedback.success ? "#4ade80" : "#f87171",
+                }}
+              >
+                {syncAllFeedback.success ? "✅ " : "❌ "}
+                {syncAllFeedback.message}
+              </div>
+            )}
           </div>
 
           {/* Script SQL para Inicializar Tablas en Supabase */}
@@ -1600,6 +1834,221 @@ export function AdminDashboard({
             >
               {SUPABASE_SQL_SETUP_SCRIPT}
             </pre>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para incorporar documentos a cualquier caso directamente desde el Admin Dashboard */}
+      {activeCaseForDocModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+            backgroundColor: "rgba(10, 15, 29, 0.82)",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <div
+            style={{
+              background: "var(--ink-soft)",
+              border: "1px solid var(--brass)",
+              borderRadius: "8px",
+              padding: "24px",
+              maxWidth: "520px",
+              width: "100%",
+              boxShadow: "0 10px 30px rgba(0, 0, 0, 0.7)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
+              <div>
+                <span style={{ fontSize: "0.72rem", color: "var(--brass-light)", textTransform: "uppercase", fontWeight: 700 }}>
+                  Expediente Judicial
+                </span>
+                <h3 style={{ margin: "2px 0 4px", fontSize: "1.15rem", color: "var(--text-bright)" }}>
+                  Incorporar Documento
+                </h3>
+                <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                  Caso: <strong>{activeCaseForDocModal.title}</strong> · Radicado: {activeCaseForDocModal.radicado || "N/A"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveCaseForDocModal(null);
+                  setDocModalFeedback(null);
+                }}
+                style={{ background: "transparent", border: "none", color: "var(--text-muted)", fontSize: "1.1rem", cursor: "pointer" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {docModalFeedback && (
+              <div
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: "4px",
+                  marginBottom: "14px",
+                  fontSize: "0.82rem",
+                  background: docModalFeedback.startsWith("Error") ? "rgba(239, 68, 68, 0.15)" : "rgba(34, 197, 94, 0.15)",
+                  border: `1px solid ${docModalFeedback.startsWith("Error") ? "#ef4444" : "#22c55e"}`,
+                  color: docModalFeedback.startsWith("Error") ? "#f87171" : "#4ade80",
+                }}
+              >
+                {docModalFeedback}
+              </div>
+            )}
+
+            <form onSubmit={handleAdminAddDocSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div>
+                <label style={{ fontSize: "0.75rem", color: "var(--text-bright)", display: "block", marginBottom: "4px", fontWeight: 600 }}>
+                  Seleccionar Archivo (PDF, Word, Imagen)
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setDocModalFileName(file.name);
+                      const sizeInMb = (file.size / (1024 * 1024)).toFixed(2);
+                      setDocModalFileSize(`${sizeInMb} MB`);
+                      if (!docModalTitle.trim()) {
+                        setDocModalTitle(file.name.replace(/\.[^/.]+$/, ""));
+                      }
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        setDocModalDataUrl(reader.result as string);
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  style={{
+                    fontSize: "0.8rem",
+                    color: "var(--text-muted)",
+                    padding: "8px",
+                    background: "var(--parchment-deep)",
+                    border: "1px dashed var(--line)",
+                    borderRadius: "4px",
+                    width: "100%",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: "0.75rem", color: "var(--text-bright)", display: "block", marginBottom: "4px", fontWeight: 600 }}>
+                  Nombre / Título del Documento *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={docModalTitle}
+                  onChange={(e) => setDocModalTitle(e.target.value)}
+                  placeholder="Ej. Auto Admisorio de Demanda, Poder Judicial, Contestación..."
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    background: "var(--parchment-deep)",
+                    border: "1px solid var(--line)",
+                    borderRadius: "4px",
+                    color: "var(--text-bright)",
+                    fontSize: "0.85rem",
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-bright)", display: "block", marginBottom: "4px", fontWeight: 600 }}>
+                    Categoría Procesal
+                  </label>
+                  <select
+                    value={docModalCategory}
+                    onChange={(e) => setDocModalCategory(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      background: "var(--parchment-deep)",
+                      border: "1px solid var(--line)",
+                      borderRadius: "4px",
+                      color: "var(--text-bright)",
+                      fontSize: "0.8rem",
+                    }}
+                  >
+                    <option value="Auto / Providencia">Auto / Providencia</option>
+                    <option value="Demanda / Poder">Demanda / Poder</option>
+                    <option value="Memorial de Contestación">Memorial de Contestación</option>
+                    <option value="Pruebas / Dictámenes">Pruebas / Dictámenes</option>
+                    <option value="Sentencia / Fallo">Sentencia / Fallo</option>
+                    <option value="Medidas Cautelares">Medidas Cautelares</option>
+                    <option value="Contrato / Factura">Contrato / Factura</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-bright)", display: "block", marginBottom: "4px", fontWeight: 600 }}>
+                    Estado
+                  </label>
+                  <select
+                    value={docModalStatus}
+                    onChange={(e) => setDocModalStatus(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      background: "var(--parchment-deep)",
+                      border: "1px solid var(--line)",
+                      borderRadius: "4px",
+                      color: "var(--text-bright)",
+                      fontSize: "0.8rem",
+                    }}
+                  >
+                    <option value="Oficial">Oficial</option>
+                    <option value="Cotejado y Verificado">Cotejado y Verificado</option>
+                    <option value="En Revisión del Despacho">En Revisión del Despacho</option>
+                    <option value="Borrador Preparatorio">Borrador Preparatorio</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px", borderTop: "1px solid var(--line)", paddingTop: "14px" }}>
+                <button
+                  type="button"
+                  onClick={() => setActiveCaseForDocModal(null)}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid var(--line)",
+                    color: "var(--text-muted)",
+                    padding: "8px 16px",
+                    borderRadius: "4px",
+                    fontSize: "0.82rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={docModalUploading}
+                  style={{
+                    background: "var(--brass)",
+                    color: "var(--ink)",
+                    border: "none",
+                    padding: "8px 20px",
+                    borderRadius: "4px",
+                    fontSize: "0.82rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {docModalUploading ? "Guardando en Supabase…" : "Incorporar al Expediente"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

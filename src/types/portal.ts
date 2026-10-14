@@ -19,11 +19,11 @@ export type DocumentItem = {
   id: string;
   case_id: string;
   name: string;
-  category: "Demanda" | "Memorial" | "Auto / Providencia" | "Poder" | "Pruebas" | "Facturación";
+  category: string;
   file_size: string;
   uploaded_at: string;
   download_url?: string;
-  status: "Oficial" | "Borrador" | "Firmado";
+  status: string;
 };
 
 export type CaseRecord = {

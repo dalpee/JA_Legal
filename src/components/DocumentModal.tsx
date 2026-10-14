@@ -80,7 +80,36 @@ export function DocumentModal({ document, caseRecord, onClose }: DocumentModalPr
           <button
             type="button"
             onClick={() => {
-              alert(`Descargando copia autorizada de: ${document.name}`);
+              if (document.download_url) {
+                const a = window.document.createElement("a");
+                a.href = (document as any).download_url;
+                a.download = document.name;
+                window.document.body.appendChild(a);
+                a.click();
+                window.document.body.removeChild(a);
+              } else {
+                // Generar copia digital descargable de la pieza procesal
+                const content = `REPÚBLICA DE COLOMBIA · RAMA JUDICIAL DEL PODER PÚBLICO
+${caseRecord.authority || "JUZGADO CIVIL DEL CIRCUITO"}
+RADICACIÓN: ${caseRecord.filed_date || caseRecord.radicado || caseRecord.id}
+PROCESO: ${caseRecord.title} (${caseRecord.process_type})
+DOCUMENTO: ${document.name}
+CATEGORÍA: ${document.category}
+FECHA INCORPORACIÓN: ${document.uploaded_at}
+ESTADO: ${document.status}
+
+EXPEDIENTE DIGITAL - J&A LEGAL ASOCIADOS
+Copia íntegra autorizada y registrada en la base de datos de gestión procesal.`;
+                const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+                const url = URL.createObjectURL(blob);
+                const a = window.document.createElement("a");
+                a.href = url;
+                a.download = document.name.endsWith(".txt") || document.name.endsWith(".pdf") ? document.name : `${document.name}.txt`;
+                window.document.body.appendChild(a);
+                a.click();
+                window.document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              }
             }}
             className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors cursor-pointer"
           >

@@ -11,6 +11,10 @@ import {
   saveStoredHistory,
   getStoredDocuments,
   saveStoredDocuments,
+  syncDocumentToDatabase,
+  deleteDocumentFromDatabase,
+  fetchDocumentsForCaseFromDatabase,
+  generateUuid,
   getStoredFinances,
   saveStoredFinances,
   resetAllToDefault,
@@ -37,7 +41,7 @@ import { FinanceSection } from "./FinanceSection";
 import { LegalCalculator } from "./LegalCalculator";
 import { SystemArchitectureModal } from "./SystemArchitectureModal";
 import { ThemeToggle } from "./ThemeToggle";
-import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText } from "./icons";
+import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText, Download } from "./icons";
 import "./ClientPortal.css";
 
 interface ClientPortalProps {
@@ -101,14 +105,19 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [isArchModalOpen, setIsArchModalOpen] = useState(false);
   const [selectedDocForPreview, setSelectedDocForPreview] = useState<DocumentItem | null>(null);
 
-  // Estados de Autenticación Real
-  const [authMode, setAuthMode] = useState<"login" | "register" | "reset">("login");
+  // Estados para subir y agregar documentos a los casos
+  const [isAddDocModalOpen, setIsAddDocModalOpen] = useState(false);
+  const [docTitle, setDocTitle] = useState("");
+  const [docCategory, setDocCategory] = useState<DocumentItem["category"]>("Auto / Providencia");
+  const [docStatus, setDocStatus] = useState<string>("Oficial");
+  const [docFileName, setDocFileName] = useState("");
+  const [docFileSize, setDocFileSize] = useState("");
+  const [docDataUrl, setDocDataUrl] = useState<string | null>(null);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+
+  // Estados de Autenticación Real (Solo Login, sin registro público ni recuperación en login)
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [regFullName, setRegFullName] = useState("");
-  const [regRole, setRegRole] = useState<"client" | "firm">("client");
-  const [regIdNumber, setRegIdNumber] = useState("");
-  const [regPhone, setRegPhone] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -269,6 +278,89 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     saveStoredHistory(updated);
   };
 
+  // Selector de archivos del equipo del usuario
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setDocFileName(file.name);
+    const sizeInMb = (file.size / (1024 * 1024)).toFixed(2);
+    setDocFileSize(file.size > 1024 * 1024 ? `${sizeInMb} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`);
+    if (!docTitle) {
+      setDocTitle(file.name.replace(/\.[^/.]+$/, ""));
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setDocDataUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Agregar nuevo documento al caso activo
+  const handleAddDocumentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!caseRecord) {
+      alert("Por favor seleccione un caso antes de agregar documentos.");
+      return;
+    }
+    if (!docTitle.trim()) {
+      alert("Ingrese el título o denominación del documento.");
+      return;
+    }
+
+    setUploadingDoc(true);
+    try {
+      const finalName = docTitle.trim().endsWith(".pdf") || docTitle.trim().endsWith(".docx")
+        ? docTitle.trim()
+        : `${docTitle.trim()}.pdf`;
+
+      const newDoc: DocumentItem = {
+        id: generateUuid(),
+        case_id: caseRecord.id,
+        name: finalName,
+        category: docCategory,
+        file_size: docFileSize || "1.2 MB",
+        uploaded_at: new Date().toISOString().split("T")[0],
+        status: docStatus || "Oficial",
+        download_url: docDataUrl || undefined,
+      };
+
+      await syncDocumentToDatabase(newDoc);
+      const updatedDocs = [newDoc, ...documents];
+      setDocuments(updatedDocs);
+
+      handleUpdateCase({
+        ...caseRecord,
+        documents_count: updatedDocs.length,
+      });
+
+      setDocTitle("");
+      setDocFileName("");
+      setDocFileSize("");
+      setDocDataUrl(null);
+      setIsAddDocModalOpen(false);
+    } catch (err: any) {
+      alert("Error al agregar documento: " + (err.message || String(err)));
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
+  // Eliminar documento del expediente
+  const handleDeleteDocument = async (docId: string, docName: string) => {
+    if (!window.confirm(`¿Está seguro de eliminar el documento "${docName}" del expediente?`)) return;
+    await deleteDocumentFromDatabase(docId);
+    const updatedDocs = documents.filter((d) => d.id !== docId);
+    setDocuments(updatedDocs);
+    if (caseRecord) {
+      handleUpdateCase({
+        ...caseRecord,
+        documents_count: updatedDocs.length,
+      });
+    }
+  };
+
   const handleUpdateDocuments = (updated: DocumentItem[]) => {
     setDocuments(updated);
     saveStoredDocuments(updated);
@@ -277,6 +369,10 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
         ...caseRecord,
         documents_count: updated.length,
       });
+      // Sincronizar automáticamente cada documento con la base de datos de Supabase
+      for (const doc of updated) {
+        syncDocumentToDatabase(doc).catch((e) => console.warn("Error sync doc to Supabase:", e));
+      }
     }
   };
 
@@ -391,13 +487,11 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
         let msg = error.message;
         const lower = msg.toLowerCase();
         if (lower.includes("invalid login credentials")) {
-          msg = "Usuario no registrado o credenciales incorrectas. Verifique su correo o cree una cuenta nueva.";
+          msg = "Credenciales incorrectas o usuario no registrado. Verifique su correo y contraseña.";
         } else if (lower.includes("email not confirmed")) {
-          msg = "Correo no confirmado en Supabase. En Supabase -> Authentication -> Providers -> Email, desactiva 'Confirm email'.";
+          msg = "Correo pendiente de confirmación en Supabase. En su panel de Supabase -> Authentication -> Providers -> Email, puede desactivar 'Confirm email' para acceso instantáneo.";
         } else if (lower.includes("invalid email")) {
           msg = "El formato del correo electrónico ingresado no es válido.";
-        } else if (lower.includes("rate limit") || lower.includes("rate_limit")) {
-          msg = "⚠️ Límite de correos de Supabase alcanzado ('email rate limit exceeded'). Supabase gratuito solo envía 3-4 correos por hora. En tu panel de Supabase ve a Authentication -> Providers -> Email y desactiva 'Confirm email' para no depender del envío de correos.";
         }
         setAuthError(msg);
       } else if (data?.session) {
@@ -405,101 +499,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       }
     } catch (err: any) {
       setAuthError(err.message || "Error al intentar iniciar sesión.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  // Registro de Nuevo Usuario Real
-  async function handleRegister(event: FormEvent) {
-    event.preventDefault();
-    setAuthError(null);
-    setAuthSuccess(null);
-
-    if (!regFullName.trim() || !email.trim() || !password) {
-      setAuthError("Por favor complete todos los campos obligatorios.");
-      return;
-    }
-
-    if (password.length < 6) {
-      setAuthError("La contraseña debe tener al menos 6 caracteres.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            full_name: regFullName.trim(),
-            role: regRole,
-            id_number: regIdNumber.trim(),
-            phone: regPhone.trim(),
-          },
-        },
-      });
-
-      if (error) {
-        const lower = error.message.toLowerCase();
-        let msg = error.message;
-        if (lower.includes("rate limit") || lower.includes("rate_limit")) {
-          msg = "⚠️ Supabase 'email rate limit exceeded': El servidor gratuito de correo de Supabase superó su límite de 3 correos/hora. Solución rápida: En Supabase ve a Authentication -> Providers -> Email y desmarca 'Confirm email'. Así tu cuenta se activará al instante sin enviar correos.";
-        } else if (lower.includes("already registered") || lower.includes("user already exists")) {
-          msg = "Este correo ya está registrado en Supabase. Ve a 'Iniciar Sesión' e introduce tu contraseña.";
-        }
-        setAuthError(msg);
-      } else {
-        setAuthSuccess(`¡Usuario registrado con éxito como ${regRole === "firm" ? "Abogado" : "Cliente"}!`);
-        if (data?.session) {
-          setSession(data.session);
-        } else {
-          setAuthMode("login");
-        }
-      }
-    } catch (err: any) {
-      setAuthError(err.message || "Error al registrar el usuario.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  // Recuperación / Restablecimiento de Contraseña
-  async function handleResetPassword(event: FormEvent) {
-    event.preventDefault();
-    setAuthError(null);
-    setAuthSuccess(null);
-
-    if (!email.trim()) {
-      setAuthError("Por favor ingrese su correo electrónico registrado.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
-      if (error) {
-        const lower = error.message.toLowerCase();
-        let msg = error.message;
-        if (lower.includes("rate limit") || lower.includes("rate_limit")) {
-          msg = "⚠️ Límite de correos superado ('email rate limit exceeded'): El servicio gratuito de Supabase solo permite 3 correos por hora. Para cambiar o definir tu contraseña sin esperar: En Supabase ve a Authentication -> Users, busca tu correo, haz clic en los 3 puntos (...) y selecciona 'Change password' o crea tu usuario con contraseña fija y 'Auto Confirm User' activo.";
-        }
-        setAuthError(msg);
-      } else {
-        const isDavid = email.trim().toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
-        if (isDavid && !isConfiguredWithRealSupabase) {
-          setAuthSuccess(
-            "🔑 Clave del Super Admin en modo local: 'Admin2026*'. También puedes ingresar directamente a la pestaña 'Crear Cuenta' o cambiarla cuando quieras."
-          );
-        } else {
-          setAuthSuccess(
-            `Se ha procesado la solicitud para ${email.trim()}. Revisa tu bandeja de entrada o actualiza la contraseña directamente en el panel de Supabase.`
-          );
-        }
-      }
-    } catch (err: any) {
-      setAuthError(err.message || "Error al intentar restablecer la contraseña.");
     } finally {
       setSubmitting(false);
     }
@@ -934,6 +933,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 }}
                 onRefreshUsers={refreshUsersList}
                 onRefreshCases={refreshCasesList}
+                currentUser={profile ? { email: profile.email, role: profile.role } : session?.user ? { email: session.user.email, role: isFirm ? "firm" : "client" } : { email, role: isFirm ? "firm" : "client" }}
               />
             )}
 
@@ -1344,82 +1344,221 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 {/* TAB: DOCUMENTOS */}
                 {activeSection === "documentos" && (
                   <article className="portal-panel">
-                    <div className="panel-title-row">
+                    <div className="panel-title-row" style={{ flexWrap: "wrap", gap: "10px" }}>
                       <div>
                         <p className="kicker">Expediente Oficial</p>
-                        <h2>Documentos del Caso</h2>
+                        <h2>Documentos del Caso ({documents.length})</h2>
                       </div>
-                      {isFirm && (
-                        <button type="button" onClick={() => setIsEditorOpen(true)}>
-                          + Gestionar archivos
-                        </button>
-                      )}
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", marginTop: "16px" }}>
-                      {documents.map((doc) => (
-                        <div
-                          key={doc.id}
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddDocModalOpen(true)}
                           style={{
-                            padding: "16px",
-                            background: "var(--parchment-deep)",
-                            border: "1px solid var(--line)",
+                            background: "var(--brass)",
+                            color: "var(--ink)",
+                            border: "none",
                             borderRadius: "4px",
-                            display: "flex",
-                            flexDirection: "column",
-                            justifyContent: "space-between",
-                            gap: "12px",
+                            padding: "7px 14px",
+                            fontSize: "0.8rem",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
                           }}
                         >
-                          <div>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-                              <span style={{ fontSize: "0.7rem", color: "var(--brass)", fontWeight: 600, textTransform: "uppercase" }}>
-                                {doc.category}
-                              </span>
-                              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{doc.uploaded_at}</span>
-                            </div>
-                            <h4 style={{ margin: 0, fontSize: "0.9rem" }}>{doc.name}</h4>
-                          </div>
-
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: "10px" }}>
-                            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{doc.file_size}</span>
-                            <div style={{ display: "flex", gap: "8px" }}>
-                              <button
-                                type="button"
-                                onClick={() => setSelectedDocForPreview(doc)}
-                                style={{
-                                  background: "transparent",
-                                  border: "1px solid var(--line)",
-                                  color: "var(--text-bright)",
-                                  padding: "4px 8px",
-                                  borderRadius: "3px",
-                                  cursor: "pointer",
-                                  fontSize: "0.75rem",
-                                }}
-                              >
-                                Ver
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => alert(`Descargando copia legal: ${doc.name}`)}
-                                style={{
-                                  background: "var(--brass)",
-                                  border: "none",
-                                  color: "var(--ink)",
-                                  fontWeight: 600,
-                                  padding: "4px 10px",
-                                  borderRadius: "3px",
-                                  cursor: "pointer",
-                                  fontSize: "0.75rem",
-                                }}
-                              >
-                                Descargar
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                          <FileText size={14} />
+                          <span>+ Subir / Agregar Documento</span>
+                        </button>
+                        {isFirm && (
+                          <button
+                            type="button"
+                            onClick={() => setIsEditorOpen(true)}
+                            style={{
+                              background: "transparent",
+                              color: "var(--brass)",
+                              border: "1px solid var(--brass)",
+                              borderRadius: "4px",
+                              padding: "7px 12px",
+                              fontSize: "0.8rem",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            ⚙️ Gestionar Archivos
+                          </button>
+                        )}
+                      </div>
                     </div>
+
+                    {documents.length === 0 ? (
+                      <div
+                        style={{
+                          textAlign: "center",
+                          padding: "40px 20px",
+                          background: "var(--parchment-deep)",
+                          border: "1px dashed var(--line)",
+                          borderRadius: "6px",
+                          marginTop: "16px",
+                        }}
+                      >
+                        <span style={{ fontSize: "2.4rem", display: "block", marginBottom: "10px" }}>📄</span>
+                        <h4 style={{ margin: "0 0 6px", color: "var(--text-bright)", fontSize: "1rem" }}>
+                          No hay documentos incorporados a este expediente aún
+                        </h4>
+                        <p style={{ margin: "0 auto 16px", maxWidth: "440px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                          Puede subir demandas, autos interlocutorios, pruebas periciales, poderes o memoriales en formato PDF, Word o imagen.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddDocModalOpen(true)}
+                          style={{
+                            background: "var(--brass)",
+                            color: "var(--ink)",
+                            border: "none",
+                            borderRadius: "4px",
+                            padding: "8px 16px",
+                            fontSize: "0.82rem",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                        >
+                          + Incorporar Primer Documento
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))", gap: "14px", marginTop: "16px" }}>
+                        {documents.map((doc) => (
+                          <div
+                            key={doc.id}
+                            style={{
+                              padding: "16px",
+                              background: "var(--parchment-deep)",
+                              border: "1px solid var(--line)",
+                              borderRadius: "6px",
+                              display: "flex",
+                              flexDirection: "column",
+                              justifyContent: "space-between",
+                              gap: "12px",
+                              transition: "transform 0.15s ease",
+                            }}
+                          >
+                            <div>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                                <span
+                                  style={{
+                                    fontSize: "0.68rem",
+                                    color: "var(--brass)",
+                                    fontWeight: 700,
+                                    textTransform: "uppercase",
+                                    background: "rgba(217, 181, 106, 0.12)",
+                                    padding: "2px 6px",
+                                    borderRadius: "3px",
+                                  }}
+                                >
+                                  {doc.category}
+                                </span>
+                                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                                  {doc.uploaded_at ? String(doc.uploaded_at).slice(0, 10) : "Reciente"}
+                                </span>
+                              </div>
+                              <h4 style={{ margin: "0 0 4px", fontSize: "0.92rem", color: "var(--text-bright)", lineHeight: 1.3 }}>
+                                {doc.name}
+                              </h4>
+                              {doc.status && (
+                                <span style={{ fontSize: "0.68rem", color: "#4ade80", background: "rgba(34, 197, 94, 0.1)", padding: "1px 6px", borderRadius: "3px" }}>
+                                  ✓ {doc.status}
+                                </span>
+                              )}
+                            </div>
+
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: "10px" }}>
+                              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{doc.file_size || "1.2 MB"}</span>
+                              <div style={{ display: "flex", gap: "6px" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedDocForPreview(doc)}
+                                  style={{
+                                    background: "transparent",
+                                    border: "1px solid var(--line)",
+                                    color: "var(--text-bright)",
+                                    padding: "4px 8px",
+                                    borderRadius: "3px",
+                                    cursor: "pointer",
+                                    fontSize: "0.74rem",
+                                  }}
+                                  title="Visualizar documento"
+                                >
+                                  Ver
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (doc.download_url) {
+                                      const a = document.createElement("a");
+                                      a.href = doc.download_url;
+                                      a.download = doc.name;
+                                      window.document.body.appendChild(a);
+                                      a.click();
+                                      window.document.body.removeChild(a);
+                                    } else {
+                                      const content = `REPÚBLICA DE COLOMBIA · RAMA JUDICIAL
+EXPEDIENTE: ${caseRecord?.title || "Proceso Judicial"}
+RADICADO: ${caseRecord?.radicado || caseRecord?.id || "N/A"}
+DOCUMENTO: ${doc.name}
+CATEGORÍA: ${doc.category}
+FECHA: ${doc.uploaded_at || new Date().toISOString()}
+
+J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
+                                      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+                                      const url = URL.createObjectURL(blob);
+                                      const a = window.document.createElement("a");
+                                      a.href = url;
+                                      a.download = doc.name;
+                                      window.document.body.appendChild(a);
+                                      a.click();
+                                      window.document.body.removeChild(a);
+                                      URL.revokeObjectURL(url);
+                                    }
+                                  }}
+                                  style={{
+                                    background: "var(--brass)",
+                                    border: "none",
+                                    color: "var(--ink)",
+                                    fontWeight: 700,
+                                    padding: "4px 9px",
+                                    borderRadius: "3px",
+                                    cursor: "pointer",
+                                    fontSize: "0.74rem",
+                                  }}
+                                  title="Descargar copia del documento"
+                                >
+                                  Descargar
+                                </button>
+                                {isFirm && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteDocument(doc.id, doc.name)}
+                                    style={{
+                                      background: "transparent",
+                                      border: "1px solid rgba(239, 68, 68, 0.4)",
+                                      color: "#ef4444",
+                                      padding: "4px 7px",
+                                      borderRadius: "3px",
+                                      cursor: "pointer",
+                                      fontSize: "0.74rem",
+                                    }}
+                                    title="Eliminar documento del expediente"
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </article>
                 )}
 
@@ -1509,6 +1648,198 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
           />
         )}
 
+        {/* Modal para Subir / Agregar Documento al Proceso */}
+        {isAddDocModalOpen && caseRecord && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+            <div
+              style={{
+                background: "var(--ink-soft)",
+                border: "1px solid var(--brass)",
+                borderRadius: "8px",
+                maxWidth: "520px",
+                width: "100%",
+                padding: "24px",
+                boxShadow: "0 20px 40px rgba(0, 0, 0, 0.6)",
+                color: "var(--text)",
+                position: "relative",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddDocModalOpen(false);
+                  setDocTitle("");
+                  setDocFileName("");
+                  setDocFileSize("");
+                  setDocDataUrl(null);
+                }}
+                style={{
+                  position: "absolute",
+                  top: "16px",
+                  right: "16px",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-muted)",
+                  fontSize: "1.2rem",
+                  cursor: "pointer",
+                }}
+              >
+                ✕
+              </button>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px", borderBottom: "1px solid var(--line)", paddingBottom: "12px" }}>
+                <span style={{ fontSize: "1.5rem" }}>📄</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "1.1rem", color: "var(--text-bright)" }}>
+                    Incorporar Documento al Expediente
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--brass)" }}>
+                    {caseRecord.title} (Radicado: {caseRecord.radicado || caseRecord.id})
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleAddDocumentSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                {/* Selector de Archivo Local */}
+                <div
+                  style={{
+                    border: "2px dashed var(--line)",
+                    borderRadius: "6px",
+                    padding: "16px",
+                    textAlign: "center",
+                    background: "var(--parchment-deep)",
+                  }}
+                >
+                  <label style={{ display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", gap: "6px" }}>
+                    <span style={{ fontSize: "1.6rem" }}>📁</span>
+                    <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-bright)" }}>
+                      {docFileName ? `Archivo seleccionado: ${docFileName}` : "Haga clic para seleccionar archivo (PDF, Word o Imagen)"}
+                    </span>
+                    {docFileSize && (
+                      <span style={{ fontSize: "0.72rem", color: "var(--brass)" }}>
+                        Tamaño detectado: {docFileSize}
+                      </span>
+                    )}
+                    <input
+                      type="file"
+                      onChange={handleFileSelect}
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt"
+                      style={{ display: "none" }}
+                    />
+                  </label>
+                </div>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: "5px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                  <span style={{ color: "var(--text-bright)", fontWeight: 600 }}>Título / Denominación del Documento *</span>
+                  <input
+                    type="text"
+                    value={docTitle}
+                    onChange={(e) => setDocTitle(e.target.value)}
+                    placeholder="Ej. Auto Admisorio de la Demanda, Contestación, Poder..."
+                    required
+                    style={{
+                      padding: "9px 12px",
+                      background: "var(--parchment-deep)",
+                      border: "1px solid var(--line)",
+                      borderRadius: "4px",
+                      color: "var(--text-bright)",
+                      fontSize: "0.85rem",
+                    }}
+                  />
+                </label>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "5px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                    <span style={{ color: "var(--text-bright)", fontWeight: 600 }}>Categoría Procesal</span>
+                    <select
+                      value={docCategory}
+                      onChange={(e) => setDocCategory(e.target.value as any)}
+                      style={{
+                        padding: "9px 10px",
+                        background: "var(--parchment-deep)",
+                        border: "1px solid var(--line)",
+                        borderRadius: "4px",
+                        color: "var(--text-bright)",
+                        fontSize: "0.82rem",
+                      }}
+                    >
+                      <option value="Auto / Providencia">Auto / Providencia</option>
+                      <option value="Demanda / Poder">Demanda / Poder</option>
+                      <option value="Memorial de Contestación">Memorial de Contestación</option>
+                      <option value="Pruebas / Dictámenes">Pruebas / Dictámenes</option>
+                      <option value="Medidas Cautelares">Medidas Cautelares</option>
+                      <option value="Sentencia / Fallo">Sentencia / Fallo</option>
+                      <option value="Contrato / Factura">Contrato / Factura</option>
+                      <option value="Liquidación de Costas">Liquidación de Costas</option>
+                    </select>
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column", gap: "5px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                    <span style={{ color: "var(--text-bright)", fontWeight: 600 }}>Estado de Cotejo</span>
+                    <select
+                      value={docStatus}
+                      onChange={(e) => setDocStatus(e.target.value)}
+                      style={{
+                        padding: "9px 10px",
+                        background: "var(--parchment-deep)",
+                        border: "1px solid var(--line)",
+                        borderRadius: "4px",
+                        color: "var(--text-bright)",
+                        fontSize: "0.82rem",
+                      }}
+                    >
+                      <option value="Oficial">Oficial</option>
+                      <option value="Cotejado y Verificado">Cotejado y Verificado</option>
+                      <option value="En Revisión del Despacho">En Revisión del Despacho</option>
+                      <option value="Borrador Preparatorio">Borrador Preparatorio</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px", borderTop: "1px solid var(--line)", paddingTop: "14px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddDocModalOpen(false);
+                      setDocTitle("");
+                      setDocFileName("");
+                      setDocFileSize("");
+                      setDocDataUrl(null);
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: "1px solid var(--line)",
+                      color: "var(--text-muted)",
+                      padding: "8px 16px",
+                      borderRadius: "4px",
+                      fontSize: "0.82rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={uploadingDoc}
+                    style={{
+                      background: "var(--brass)",
+                      color: "var(--ink)",
+                      border: "none",
+                      padding: "8px 20px",
+                      borderRadius: "4px",
+                      fontSize: "0.82rem",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {uploadingDoc ? "Guardando en Supabase…" : "Incorporar al Expediente"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* Modal de Arquitectura del Software (Ingeniería de Sistemas) */}
         <SystemArchitectureModal
           isOpen={isArchModalOpen}
@@ -1518,342 +1849,66 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     );
   }
 
-  // ==========================================
-  // VISTA DE LOGIN Y REGISTRO (SIN BOTONES DE DEMO)
-  // ==========================================
+  // =========================================================================
+  // VISTA DE LOGIN EXCLUSIVA (Solo Login, sin registro público ni cuentas demo)
+  // =========================================================================
   return (
     <main className="client-portal login-view">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: "440px", marginBottom: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: "420px", marginBottom: "16px" }}>
         <button type="button" onClick={handleBack} className="portal-back login-back" style={{ margin: 0 }}>
-          ← Volver a la página principal
+          ← Volver al sitio web principal
         </button>
         <ThemeToggle />
       </div>
 
-      <section className="portal-card login-card" style={{ maxWidth: "440px" }}>
-        <img src={logo} alt="Jiménez &amp; Ariza Asociados" className="portal-logo" />
+      <section className="portal-card login-card" style={{ maxWidth: "420px", padding: "32px 28px" }}>
+        <img src={logo} alt="Jiménez &amp; Ariza Asociados" className="portal-logo" style={{ maxWidth: "180px", margin: "0 auto 16px" }} />
 
-        <p className="kicker">Acceso Seguro</p>
-        <h1 style={{ fontSize: "1.45rem", marginBottom: "8px" }}>
-          {authMode === "login" ? "Portal de Clientes & Despacho" : "Crear Cuenta en el Sistema"}
+        <p className="kicker" style={{ textAlign: "center" }}>Acceso Corporativo Seguro</p>
+        <h1 style={{ fontSize: "1.35rem", marginBottom: "6px", textAlign: "center" }}>
+          Portal de Clientes &amp; Despacho
         </h1>
-        <p className="portal-text" style={{ fontSize: "0.85rem", marginBottom: "16px" }}>
-          {authMode === "login"
-            ? "Ingrese con sus credenciales autorizadas para consultar el estado de sus procesos."
-            : "Complete sus datos para habilitar su acceso al sistema de seguimiento procesal."}
+        <p className="portal-text" style={{ fontSize: "0.82rem", marginBottom: "22px", textAlign: "center", color: "var(--text-muted)" }}>
+          Ingrese sus credenciales autorizadas para consultar y gestionar sus expedientes judiciales.
         </p>
 
-        {/* Pestañas: Iniciar Sesión vs Registrarse vs Recuperar */}
-        <div className="auth-nav-tabs">
-          <button
-            type="button"
-            className={`auth-nav-tab ${authMode === "login" ? "active" : ""}`}
-            onClick={() => {
-              setAuthMode("login");
-              setAuthError(null);
-              setAuthSuccess(null);
-            }}
-          >
-            Iniciar Sesión
-          </button>
-          <button
-            type="button"
-            className={`auth-nav-tab ${authMode === "register" ? "active" : ""}`}
-            onClick={() => {
-              setAuthMode("register");
-              setAuthError(null);
-              setAuthSuccess(null);
-            }}
-          >
-            Crear Cuenta
-          </button>
-          <button
-            type="button"
-            className={`auth-nav-tab ${authMode === "reset" ? "active" : ""}`}
-            onClick={() => {
-              setAuthMode("reset");
-              setAuthError(null);
-              setAuthSuccess(null);
-            }}
-          >
-            Recuperar Clave
-          </button>
-        </div>
-
         {authSuccess && <p className="auth-success-msg">{authSuccess}</p>}
-        {authError && <p className="portal-form-error">{authError}</p>}
+        {authError && <p className="portal-form-error" style={{ marginBottom: "16px" }}>{authError}</p>}
 
-        {authMode === "login" && (
-          /* FORMULARIO DE INICIO DE SESIÓN */
-          <form className="portal-form" onSubmit={handleLogin}>
-            <label>
-              Correo electrónico
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="eldavidprz@gmail.com"
-                required
-              />
-            </label>
+        {/* FORMULARIO ESTRICTO DE INICIO DE SESIÓN */}
+        <form className="portal-form" onSubmit={handleLogin}>
+          <label>
+            Correo electrónico
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="nombre@correo.com"
+              required
+              autoFocus
+            />
+          </label>
 
-            <label>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>Contraseña</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode("reset");
-                    setAuthError(null);
-                    setAuthSuccess(null);
-                  }}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--brass)",
-                    fontSize: "0.74rem",
-                    cursor: "pointer",
-                    textDecoration: "underline",
-                    padding: 0,
-                  }}
-                >
-                  ¿Olvidó su contraseña?
-                </button>
-              </div>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
-            </label>
+          <label>
+            Contraseña
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              required
+            />
+          </label>
 
-            <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "8px" }}>
-              {submitting ? "Verificando…" : "Ingresar al portal"}
-            </button>
-          </form>
-        )}
+          <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "10px", width: "100%", padding: "12px" }}>
+            {submitting ? "Verificando credenciales…" : "Iniciar Sesión"}
+          </button>
+        </form>
 
-        {authMode === "register" && (
-          /* FORMULARIO DE REGISTRO CON SELECCIÓN DE ROL */
-          <form className="portal-form" onSubmit={handleRegister}>
-            <label>
-              Nombre Completo *
-              <input
-                type="text"
-                value={regFullName}
-                onChange={(e) => setRegFullName(e.target.value)}
-                placeholder="David Pérez"
-                required
-              />
-            </label>
-
-            <label>
-              Rol en el Sistema *
-              <select
-                className="auth-role-select"
-                value={regRole}
-                onChange={(e) => setRegRole(e.target.value as "client" | "firm")}
-              >
-                <option value="client">👤 Cliente (Titular del Proceso)</option>
-                <option value="firm">⚖️ Abogado / Miembro de la Firma</option>
-              </select>
-            </label>
-
-            <label>
-              Documento de Identificación (C.C. o Tarjeta Profesional)
-              <input
-                type="text"
-                value={regIdNumber}
-                onChange={(e) => setRegIdNumber(e.target.value)}
-                placeholder={regRole === "firm" ? "Super Admin Titular" : "C.C. 1.020.340.550"}
-              />
-            </label>
-
-            <label>
-              Correo electrónico *
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="eldavidprz@gmail.com"
-                required
-              />
-            </label>
-
-            <label>
-              Contraseña *
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Mínimo 6 caracteres"
-                required
-              />
-            </label>
-
-            <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "8px" }}>
-              {submitting ? "Creando cuenta…" : "Registrar y Acceder"}
-            </button>
-          </form>
-        )}
-
-        {authMode === "reset" && (
-          /* FORMULARIO DE RECUPERACIÓN DE CONTRASEÑA */
-          <form className="portal-form" onSubmit={handleResetPassword}>
-            <label>
-              Correo electrónico registrado *
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="eldavidprz@gmail.com"
-                required
-              />
-            </label>
-
-            <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "8px" }}>
-              {submitting ? "Verificando…" : "Recuperar / Consultar Clave"}
-            </button>
-
-            <div
-              style={{
-                marginTop: "12px",
-                padding: "10px",
-                borderRadius: "4px",
-                background: "rgba(234, 179, 8, 0.08)",
-                border: "1px solid rgba(234, 179, 8, 0.25)",
-                fontSize: "0.74rem",
-                color: "var(--text-muted)",
-                lineHeight: 1.4,
-              }}
-            >
-              <strong style={{ color: "#facc15", display: "block", marginBottom: "4px" }}>
-                💡 ¿Aparece &apos;email rate limit exceeded&apos;?
-              </strong>
-              <span>
-                Supabase gratuito limita el envío a 3 correos por hora. Puedes cambiar o fijar la contraseña de cualquier usuario directamente en tu panel de Supabase:
-                <strong style={{ color: "var(--text-bright)" }}> Authentication → Users → tres puntos (…) → &quot;Change password&quot;</strong>, o crear el usuario con &quot;Auto Confirm User&quot; activo.
-              </span>
-            </div>
-
-            <button
-              type="button"
-              className="btn text"
-              onClick={() => {
-                setAuthMode("login");
-                setAuthError(null);
-                setAuthSuccess(null);
-              }}
-              style={{ marginTop: "6px", fontSize: "0.8rem", color: "var(--text-muted)" }}
-            >
-              ← Volver al inicio de sesión
-            </button>
-          </form>
-        )}
-
-        <div style={{ marginTop: "18px", paddingTop: "14px", borderTop: "1px solid var(--line)", textAlign: "left" }}>
-          {/* Indicador de Estado de Conexión a Supabase */}
-          <div
-            style={{
-              padding: "7px 10px",
-              borderRadius: "4px",
-              marginBottom: "12px",
-              background: isConfiguredWithRealSupabase ? "rgba(34, 197, 94, 0.12)" : "rgba(234, 179, 8, 0.12)",
-              border: `1px solid ${isConfiguredWithRealSupabase ? "rgba(34, 197, 94, 0.35)" : "rgba(234, 179, 8, 0.35)"}`,
-              fontSize: "0.72rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <span style={{ fontSize: "0.85rem" }}>{isConfiguredWithRealSupabase ? "🟢" : "🟠"}</span>
-            <div>
-              <strong style={{ color: isConfiguredWithRealSupabase ? "#4ade80" : "#facc15", display: "block" }}>
-                {isConfiguredWithRealSupabase ? "Base de Datos Supabase: Conectada" : "Modo Autónomo Local Activo"}
-              </strong>
-              <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>
-                {isConfiguredWithRealSupabase ? "Conexión a la nube PostgreSQL verificada" : "Almacenamiento local seguro activo"}
-              </span>
-            </div>
-          </div>
-
-          <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "8px" }}>
-            <div style={{ background: "rgba(217, 181, 106, 0.1)", border: "1px solid var(--brass)", padding: "10px 12px", borderRadius: "6px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                <strong style={{ color: "var(--brass)", fontSize: "0.76rem" }}>
-                  👑 Credenciales Super Admin:
-                </strong>
-                <span style={{ fontSize: "0.68rem", color: "#4ade80", background: "rgba(34, 197, 94, 0.12)", padding: "1px 6px", borderRadius: "4px" }}>
-                  Acceso Total
-                </span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "2px", margin: "4px 0" }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Correo:</span>
-                  <code style={{ color: "var(--text-bright)", fontSize: "0.78rem" }}>{SUPER_ADMIN_EMAIL}</code>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Clave asignada:</span>
-                  <code style={{ color: "#facc15", fontWeight: "bold", fontSize: "0.82rem" }}>Admin2026*</code>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail(SUPER_ADMIN_EMAIL);
-                    setPassword("Admin2026*");
-                    setAuthMode("login");
-                    setAuthError(null);
-                    setAuthSuccess(null);
-                  }}
-                  style={{
-                    background: "var(--brass)",
-                    color: "var(--ink)",
-                    border: "none",
-                    borderRadius: "4px",
-                    padding: "4px 8px",
-                    fontSize: "0.7rem",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    width: "100%",
-                  }}
-                >
-                  ⚡ Autocompletar y Probar Acceso
-                </button>
-              </div>
-              <span style={{ display: "block", color: "var(--text-muted)", fontSize: "0.66rem", marginTop: "5px" }}>
-                Si deseas usar otra clave, ve a la pestaña <strong>&quot;Crear Cuenta&quot;</strong> o regístrate con tu contraseña preferida; el sistema reconocerá tu correo y te otorgará los permisos de Super Admin de inmediato.
-              </span>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "2px" }}>
-              <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>
-                ¿Cuentas demo anteriores?
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  resetAllToDefault();
-                  window.location.reload();
-                }}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--text-muted)",
-                  fontSize: "0.68rem",
-                  cursor: "pointer",
-                  textDecoration: "underline",
-                  padding: 0,
-                }}
-                title="Elimina usuarios y casos de prueba antiguos para empezar limpio"
-              >
-                Eliminar cuentas demo y purgar caché
-              </button>
-            </div>
-          </div>
+        <div style={{ marginTop: "24px", paddingTop: "14px", borderTop: "1px solid var(--line)", textAlign: "center" }}>
+          <p style={{ margin: 0, fontSize: "0.74rem", color: "var(--text-muted)" }}>
+            J&amp;A Legal · Jiménez &amp; Ariza Asociados © {new Date().getFullYear()}
+          </p>
         </div>
       </section>
     </main>
