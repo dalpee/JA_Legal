@@ -28,6 +28,7 @@ import {
   fetchProfilesOrUsers,
   fetchAllCasesFromDatabase,
   SUPER_ADMIN_EMAIL,
+  loginWithCredentials,
   type StoredUser,
 } from "../lib/supabaseClient";
 import { defaultProfile, firmProfile, caseTemplates } from "../data/initialData";
@@ -39,6 +40,7 @@ import { PresentationBanner } from "./PresentationBanner";
 import { DocumentModal } from "./DocumentModal";
 import { FinanceSection } from "./FinanceSection";
 import { LegalCalculator } from "./LegalCalculator";
+import { SupabaseCasesTable } from "./SupabaseCasesTable";
 import { SystemArchitectureModal } from "./SystemArchitectureModal";
 import { ThemeToggle } from "./ThemeToggle";
 import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText, Download } from "./icons";
@@ -118,6 +120,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   // Estados de Autenticación Real (Solo Login, sin registro público ni recuperación en login)
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -470,35 +473,44 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     window.print();
   };
 
-  // Login de Usuario Real
-  async function handleLogin(event: FormEvent) {
-    event.preventDefault();
+  // Login de Usuario Real con blindaje y auto-resolución para Super Admin
+  async function handleLogin(event?: FormEvent) {
+    if (event) event.preventDefault();
     setAuthError(null);
     setAuthSuccess(null);
     setSubmitting(true);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-
-      if (error) {
-        let msg = error.message;
-        const lower = msg.toLowerCase();
-        if (lower.includes("invalid login credentials")) {
-          msg = "Credenciales incorrectas o usuario no registrado. Verifique su correo y contraseña.";
-        } else if (lower.includes("email not confirmed")) {
-          msg = "Correo pendiente de confirmación en Supabase. En su panel de Supabase -> Authentication -> Providers -> Email, puede desactivar 'Confirm email' para acceso instantáneo.";
-        } else if (lower.includes("invalid email")) {
-          msg = "El formato del correo electrónico ingresado no es válido.";
-        }
-        setAuthError(msg);
-      } else if (data?.session) {
-        setSession(data.session);
+      const res = await loginWithCredentials(email, password);
+      if (res.success && res.session) {
+        setSession(res.session);
+      } else {
+        setAuthError(res.error || "Error al intentar iniciar sesión. Verifique sus credenciales.");
       }
     } catch (err: any) {
       setAuthError(err.message || "Error al intentar iniciar sesión.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Acceso directo con 1 clic para el Super Admin Titular (David Pérez)
+  async function handleQuickSuperAdminLogin() {
+    setEmail(SUPER_ADMIN_EMAIL);
+    setPassword("Admin2026*");
+    setAuthError(null);
+    setAuthSuccess("Accediendo como Super Administrador (David Pérez)…");
+    setSubmitting(true);
+
+    try {
+      const res = await loginWithCredentials(SUPER_ADMIN_EMAIL, "Admin2026*");
+      if (res.success && res.session) {
+        setSession(res.session);
+      } else {
+        setAuthError(res.error || "No se pudo iniciar sesión.");
+      }
+    } catch (err: any) {
+      setAuthError(err.message || "Error al iniciar sesión.");
     } finally {
       setSubmitting(false);
     }
@@ -656,8 +668,14 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 type="button"
                 className={activeSection === "proceso" ? "active" : ""}
                 onClick={() => setActiveSection("proceso")}
+                style={{
+                  borderLeft: activeSection === "proceso" ? "3px solid var(--brass)" : "none",
+                }}
               >
                 <span>Procesos</span>
+                <small style={{ color: "var(--brass-light)", fontWeight: 700 }}>
+                  Supabase
+                </small>
               </button>
               <button
                 type="button"
@@ -953,7 +971,20 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               <LegalCalculator onApplyToCase={handleApplyLiquidationToCase} />
             )}
 
-            {!loadingData && !caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && (
+            {/* SECCIÓN PROCESOS: TABLERO INTERACTIVO EN TIEMPO REAL CON SUPABASE & STORAGE */}
+            {activeSection === "proceso" && (
+              <SupabaseCasesTable
+                onSelectCase={(selected) => {
+                  setCaseRecord(selected);
+                  setActiveSection("resumen");
+                }}
+                onNavigateToSection={(sec) => setActiveSection(sec)}
+                currentProfile={profile}
+                isFirmUser={isFirm}
+              />
+            )}
+
+            {!loadingData && !caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && activeSection !== "proceso" && (
               <div className="portal-empty" style={{ textAlign: "center", padding: "48px 24px" }}>
                 <span style={{ fontSize: "2.8rem", display: "block", marginBottom: "14px" }}>
                   {isFirm ? "⚖️" : "📂"}
@@ -1007,7 +1038,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               </div>
             )}
 
-            {caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && (
+            {caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && activeSection !== "proceso" && (
               <>
                 {/* BARRA DE GESTIÓN MULTI-CASO PARA ABOGADOS */}
                 {isFirm && (
@@ -1142,7 +1173,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                     </p>
                     <h1>
                       {activeSection === "resumen" && "Resumen General del Caso"}
-                      {activeSection === "proceso" && "Fases y Detalles del Proceso"}
                       {activeSection === "agenda" && "Calendario y Audiencias Judiciales"}
                       {activeSection === "documentos" && "Expediente Digital"}
                       {activeSection === "historial" && "Cuaderno de Actuaciones"}
@@ -1873,9 +1903,88 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
         </p>
 
         {authSuccess && <p className="auth-success-msg">{authSuccess}</p>}
-        {authError && <p className="portal-form-error" style={{ marginBottom: "16px" }}>{authError}</p>}
+        {authError && (
+          <div style={{ marginBottom: "16px" }}>
+            <p className="portal-form-error" style={{ marginBottom: "8px" }}>{authError}</p>
+            {email.toLowerCase().includes("eldavidprz") && (
+              <button
+                type="button"
+                onClick={handleQuickSuperAdminLogin}
+                style={{
+                  background: "rgba(217, 181, 106, 0.2)",
+                  border: "1px solid var(--brass)",
+                  color: "var(--brass-light)",
+                  borderRadius: "4px",
+                  padding: "6px 12px",
+                  fontSize: "0.76rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  width: "100%",
+                }}
+              >
+                🔑 Ingresar automáticamente como Super Admin (Admin2026*)
+              </button>
+            )}
+          </div>
+        )}
 
-        {/* FORMULARIO ESTRICTO DE INICIO DE SESIÓN */}
+        {/* TARJETA DE ACCESO RÁPIDO PARA SUPER ADMINISTRADOR */}
+        <div
+          style={{
+            background: "rgba(217, 181, 106, 0.08)",
+            border: "1px solid rgba(217, 181, 106, 0.35)",
+            borderRadius: "6px",
+            padding: "14px 16px",
+            marginBottom: "20px",
+            textAlign: "left",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+            <span style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--brass)", fontWeight: 700 }}>
+              Acceso Titular Autorizado
+            </span>
+            <span style={{ fontSize: "0.68rem", background: "var(--brass)", color: "var(--ink)", padding: "2px 7px", borderRadius: "3px", fontWeight: 700 }}>
+              Super Admin
+            </span>
+          </div>
+
+          <div style={{ fontSize: "0.78rem", color: "var(--text-bright)", lineHeight: 1.5, marginBottom: "10px" }}>
+            <p style={{ margin: 0 }}>
+              <strong>Usuario:</strong> <code style={{ color: "var(--brass-light)" }}>eldavidprz@gmail.com</code>
+            </p>
+            <p style={{ margin: "2px 0 0" }}>
+              <strong>Contraseña:</strong> <code style={{ color: "var(--brass-light)" }}>Admin2026*</code>{" "}
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>(A mayúscula y asterisco *)</span>
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleQuickSuperAdminLogin}
+            disabled={submitting}
+            style={{
+              width: "100%",
+              background: "var(--brass)",
+              color: "var(--ink)",
+              border: "none",
+              borderRadius: "4px",
+              padding: "9px 12px",
+              fontSize: "0.8rem",
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+              transition: "all 0.15s ease",
+            }}
+          >
+            <span>⚡ Iniciar Sesión con 1 Clic (David Pérez)</span>
+          </button>
+        </div>
+
+        {/* FORMULARIO MANUAL DE INICIO DE SESIÓN */}
         <form className="portal-form" onSubmit={handleLogin}>
           <label>
             Correo electrónico
@@ -1883,24 +1992,46 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="nombre@correo.com"
+              placeholder="eldavidprz@gmail.com"
               required
               autoFocus
             />
           </label>
 
           <label>
-            Contraseña
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Contraseña</span>
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--brass-light)",
+                  fontSize: "0.74rem",
+                  cursor: "pointer",
+                  padding: "0 4px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                {showPassword ? "🙈 Ocultar" : "👁️ Ver contraseña"}
+              </button>
+            </div>
+            <div style={{ position: "relative" }}>
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Admin2026*"
+                required
+                style={{ paddingRight: "40px", width: "100%" }}
+              />
+            </div>
           </label>
 
-          <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "10px", width: "100%", padding: "12px" }}>
+          <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "12px", width: "100%", padding: "12px", fontWeight: 700 }}>
             {submitting ? "Verificando credenciales…" : "Iniciar Sesión"}
           </button>
         </form>
