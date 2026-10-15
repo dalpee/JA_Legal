@@ -56,6 +56,51 @@ export default function App() {
 
   return (
     <div className="site-wrapper">
+      {/* Barra superior de acceso directo al Portal de Clientes & Despacho */}
+      <div
+        style={{
+          background: "linear-gradient(90deg, #0b1324 0%, #1e293b 50%, #0f172a 100%)",
+          borderBottom: "1px solid var(--brass)",
+          padding: "8px 16px",
+          color: "#f8fafc",
+          fontSize: "0.82rem",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "10px",
+          zIndex: 1000,
+          position: "relative",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <span style={{ fontSize: "1.1rem" }}>🏛️</span>
+          <span>
+            <strong>Portal de Clientes &amp; Despacho J&amp;A:</strong> Acceso para <strong>David Pérez</strong>, <strong>Dr. Marlon Jiménez</strong>, <strong>Dr. Sebastián Ariza</strong> y Clientes.
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={openPortal}
+          style={{
+            background: "var(--brass)",
+            color: "var(--ink)",
+            fontWeight: 700,
+            border: "none",
+            padding: "6px 16px",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontSize: "0.78rem",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+          }}
+        >
+          <span>🔑 Entrar al Despacho / Portal →</span>
+        </button>
+      </div>
+
       <Navbar onOpenPortal={openPortal} />
       <main>
         <Hero />

@@ -115,7 +115,7 @@ export function clearSupabaseConfig() {
   }
 }
 
-// ÚNICO Super Admin predeterminado configurado
+// Super Admin Titular predeterminado
 export const INITIAL_SUPERADMIN_USER: StoredUser = {
   id: "00000000-0000-4000-a000-000000000001",
   email: SUPER_ADMIN_EMAIL,
@@ -128,7 +128,40 @@ export const INITIAL_SUPERADMIN_USER: StoredUser = {
   created_at: new Date().toISOString(),
 };
 
-// Obtiene la lista de usuarios, eliminando cualquier cuenta demo antigua (abogado@ y cliente@)
+// Socio Administrador 1: Dr. Marlon Jiménez
+export const INITIAL_ADMIN_1_USER: StoredUser = {
+  id: "00000000-0000-4000-a000-000000000002",
+  email: ADMIN_1_EMAIL,
+  password: "Admin2026*",
+  full_name: "Dr. Marlon Jiménez",
+  initials: "MJ",
+  role: "firm",
+  id_number: "T.P. 182.904 del C.S.J. · Socio Administrador",
+  phone: "+57 312 214 9562",
+  created_at: new Date().toISOString(),
+};
+
+// Socio Administrador 2: Dr. Felipe Sebastián Ariza Gómez
+export const INITIAL_ADMIN_2_USER: StoredUser = {
+  id: "00000000-0000-4000-a000-000000000003",
+  email: ADMIN_2_EMAIL,
+  password: "Admin2026*",
+  full_name: "Dr. Felipe Sebastián Ariza Gómez",
+  initials: "SA",
+  role: "firm",
+  id_number: "T.P. 195.420 del C.S.J. · Socio Administrador",
+  phone: "+57 315 220 1199",
+  created_at: new Date().toISOString(),
+};
+
+// Lista de los 3 Administradores Titulares de la Firma J&A Legal
+export const INITIAL_FIRM_ADMINS: StoredUser[] = [
+  INITIAL_SUPERADMIN_USER,
+  INITIAL_ADMIN_1_USER,
+  INITIAL_ADMIN_2_USER,
+];
+
+// Obtiene la lista de usuarios, asegurando los 3 Administradores autorizados
 export function getStoredUsers(): StoredUser[] {
   try {
     const raw = localStorage.getItem(STORAGE_USERS_KEY);
@@ -136,7 +169,6 @@ export function getStoredUsers(): StoredUser[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        // Filtra cualquier residuo de las cuentas demo anteriores
         list = parsed.filter(
           (u) =>
             u.email.toLowerCase() !== "abogado@jalegal.com.co" &&
@@ -145,19 +177,22 @@ export function getStoredUsers(): StoredUser[] {
       }
     }
 
-    // Asegura que el Super Admin eldavidprz@gmail.com siempre esté presente como 'firm'
-    const hasSuperAdmin = list.some(
-      (u) => u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()
-    );
-    if (!hasSuperAdmin) {
-      list.unshift(INITIAL_SUPERADMIN_USER);
-    } else {
-      // Garantizar que tenga rol 'firm' y contraseña 'Admin2026*'
-      list = list.map((u) =>
-        u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()
-          ? { ...u, role: "firm" as const, password: "Admin2026*" }
-          : u
+    // Asegurar que el Super Admin (David) y los 2 Administradores (Marlon y Sebastián) siempre existan
+    for (const admin of INITIAL_FIRM_ADMINS) {
+      const existingIndex = list.findIndex(
+        (u) => u.email.toLowerCase() === admin.email.toLowerCase()
       );
+      if (existingIndex < 0) {
+        list.push(admin);
+      } else {
+        // Mantener su rol 'firm' y si no tiene password o es antigua, asegurar Admin2026*
+        list[existingIndex] = {
+          ...list[existingIndex],
+          role: "firm",
+          password: list[existingIndex].password || "Admin2026*",
+          full_name: list[existingIndex].full_name || admin.full_name,
+        };
+      }
     }
 
     // Persistir lista limpia sin las cuentas viejas
@@ -165,7 +200,7 @@ export function getStoredUsers(): StoredUser[] {
     return list;
   } catch (e) {
     console.warn("Error reading stored users", e);
-    return [INITIAL_SUPERADMIN_USER];
+    return INITIAL_FIRM_ADMINS;
   }
 }
 
@@ -189,6 +224,29 @@ export function deleteStoredUser(userId: string) {
     localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
   } catch (e) {
     console.warn("Error deleting user", e);
+  }
+}
+
+// Permite actualizar la clave de un usuario o cliente directamente
+export function updateUserPassword(userIdOrEmail: string, newPassword: string): boolean {
+  try {
+    const cleanIdOrEmail = userIdOrEmail.trim().toLowerCase();
+    const users = getStoredUsers();
+    let updated = false;
+    const nextList = users.map((u) => {
+      if (u.id === userIdOrEmail || u.email.toLowerCase() === cleanIdOrEmail) {
+        updated = true;
+        return { ...u, password: newPassword.trim() };
+      }
+      return u;
+    });
+    if (updated) {
+      localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(nextList));
+    }
+    return updated;
+  } catch (e) {
+    console.warn("Error updating user password", e);
+    return false;
   }
 }
 
@@ -891,23 +949,28 @@ export async function loginWithCredentials(
     return { success: false, error: "Por favor ingrese su contraseña." };
   }
 
-  const isSuperAdminEmail = cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase();
-  // Acepta Admin2026* con o sin mayúscula para evitar bloqueos por teclado móvil
-  const isSuperAdminPassword =
-    rawPassword === "Admin2026*" ||
-    rawPassword.toLowerCase() === "admin2026*" ||
-    rawPassword.toLowerCase() === "admin2026";
-
   const cfg = getSupabaseConfig();
 
   // =========================================================================
-  // CASO 1: SUPER ADMINISTRADOR TITULAR (David Pérez - eldavidprz@gmail.com)
+  // CASO 1: ADMINISTRADORES DE LA FIRMA (David Pérez, Dr. Marlon Jiménez, Dr. Sebastián Ariza)
   // =========================================================================
-  if (isSuperAdminEmail) {
-    if (!isSuperAdminPassword) {
+  const firmAdminUser = INITIAL_FIRM_ADMINS.find(
+    (a) => a.email.toLowerCase() === cleanEmail
+  );
+
+  if (firmAdminUser) {
+    const isMasterPassword =
+      rawPassword === "Admin2026*" ||
+      rawPassword.toLowerCase() === "admin2026*" ||
+      rawPassword.toLowerCase() === "admin2026" ||
+      rawPassword === "Socio2026*" ||
+      rawPassword.toLowerCase() === "socio2026*" ||
+      rawPassword === (firmAdminUser.password || "Admin2026*");
+
+    if (!isMasterPassword) {
       return {
         success: false,
-        error: "Contraseña incorrecta para el Super Admin. La clave maestra es: Admin2026* (A mayúscula y asterisco al final).",
+        error: `Contraseña incorrecta para el Administrador (${firmAdminUser.full_name}). La clave oficial es: Admin2026* (con A mayúscula y asterisco al final).`,
       };
     }
 
@@ -934,10 +997,10 @@ export async function loginWithCredentials(
             password: "Admin2026*",
             options: {
               data: {
-                full_name: "David Pérez",
+                full_name: firmAdminUser.full_name,
                 role: "firm",
-                id_number: "Super Admin Titular",
-                phone: "+57 300 000 0000",
+                id_number: firmAdminUser.id_number,
+                phone: firmAdminUser.phone,
               },
             },
           });
@@ -946,33 +1009,33 @@ export async function loginWithCredentials(
             return { success: true, session: signUpData.session };
           }
         } catch (signupErr) {
-          console.warn("Aviso auto-registro Super Admin en Supabase:", signupErr);
+          console.warn("Aviso auto-registro Admin en Supabase:", signupErr);
         }
 
         // 3. Asegurar que exista en la tabla public.profiles de Supabase
         try {
           await client.from("profiles").upsert({
-            id: INITIAL_SUPERADMIN_USER.id,
+            id: firmAdminUser.id,
             email: cleanEmail,
-            full_name: "David Pérez",
-            initials: "DP",
+            full_name: firmAdminUser.full_name,
+            initials: firmAdminUser.initials,
             role: "firm",
-            id_number: "Super Admin Titular",
-            phone: "+57 300 000 0000",
+            id_number: firmAdminUser.id_number,
+            phone: firmAdminUser.phone,
           });
         } catch (profileErr) {
-          console.warn("Aviso upsert profile Super Admin:", profileErr);
+          console.warn("Aviso upsert profile Admin:", profileErr);
         }
       } catch (err) {
-        console.warn("Aviso conectando Super Admin a Supabase remoto:", err);
+        console.warn("Aviso conectando Admin a Supabase remoto:", err);
       }
     }
 
     // 4. Si Supabase no está conectado o el correo requería confirmación de email:
-    // El Super Admin NUNCA queda bloqueado de su propia plataforma.
-    const superSession = createUserSession(INITIAL_SUPERADMIN_USER);
-    notifyAuthChange("SIGNED_IN", superSession);
-    return { success: true, session: superSession };
+    // Los Administradores NUNCA quedan bloqueados de su propia plataforma.
+    const adminSession = createUserSession(firmAdminUser);
+    notifyAuthChange("SIGNED_IN", adminSession);
+    return { success: true, session: adminSession };
   }
 
   // =========================================================================

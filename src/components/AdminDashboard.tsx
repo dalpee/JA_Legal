@@ -16,6 +16,7 @@ import {
   syncDocumentToDatabase,
   saveStoredCase,
   SUPABASE_SQL_SETUP_SCRIPT,
+  updateUserPassword,
 } from "../lib/supabaseClient";
 
 interface AdminDashboardProps {
@@ -54,6 +55,10 @@ export function AdminDashboard({
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
+  const [editingPasswordUserId, setEditingPasswordUserId] = useState<string | null>(null);
+  const [editedPasswordValue, setEditedPasswordValue] = useState("");
+  const [passwordChangeFeedback, setPasswordChangeFeedback] = useState<string | null>(null);
 
   // Validación estricta: solo Super Admin y los 2 Administradores de la firma pueden crear cuentas
   const userCanCreate = canCreateAccounts(currentUser);
@@ -1066,7 +1071,88 @@ export function AdminDashboard({
       {/* ======================================================== */}
       {activeTab === "clientes" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* Instrucciones y Ayuda para Supabase */}
+          {/* 1. PANEL DE CLAVES Y CREDENCIALES DE LOS ADMINISTRADORES */}
+          <div
+            style={{
+              background: "rgba(217, 181, 106, 0.08)",
+              border: "1px solid var(--brass)",
+              borderRadius: "8px",
+              padding: "18px 22px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "1.2rem" }}>🔑</span>
+                <h4 style={{ margin: 0, fontSize: "1.05rem", color: "var(--brass-light)" }}>
+                  Claves de Acceso de los 3 Administradores de J&amp;A Legal
+                </h4>
+              </div>
+              <span style={{ fontSize: "0.72rem", background: "var(--brass)", color: "var(--ink)", padding: "2px 8px", borderRadius: "3px", fontWeight: 800 }}>
+                Firma Autorizada
+              </span>
+            </div>
+
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              Tanto el Super Admin titular como los dos Socios Administradores tienen acceso total para gestionar expedientes y crear nuevas cuentas.
+            </p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px", marginTop: "4px" }}>
+              {/* David Pérez */}
+              <div style={{ background: "var(--parchment-deep)", border: "1px solid var(--line)", padding: "12px 14px", borderRadius: "6px" }}>
+                <span style={{ fontSize: "0.68rem", textTransform: "uppercase", color: "var(--brass)", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                  👑 Super Admin Titular
+                </span>
+                <strong style={{ display: "block", color: "var(--text-bright)", fontSize: "0.9rem" }}>David Pérez</strong>
+                <p style={{ margin: "2px 0 6px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                  <code>{SUPER_ADMIN_EMAIL}</code>
+                </p>
+                <div style={{ fontSize: "0.76rem", background: "var(--ink-soft)", padding: "6px 8px", borderRadius: "4px", border: "1px dashed var(--brass)" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Contraseña: </span>
+                  <code style={{ color: "var(--brass-light)", fontWeight: 700 }}>Admin2026*</code>
+                </div>
+              </div>
+
+              {/* Dr. Marlon Jiménez */}
+              <div style={{ background: "var(--parchment-deep)", border: "1px solid var(--line)", padding: "12px 14px", borderRadius: "6px" }}>
+                <span style={{ fontSize: "0.68rem", textTransform: "uppercase", color: "#38bdf8", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                  ⚖️ Socio Administrador 1
+                </span>
+                <strong style={{ display: "block", color: "var(--text-bright)", fontSize: "0.9rem" }}>Dr. Marlon Jiménez</strong>
+                <p style={{ margin: "2px 0 6px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                  <code>{ADMIN_1_EMAIL}</code>
+                </p>
+                <div style={{ fontSize: "0.76rem", background: "var(--ink-soft)", padding: "6px 8px", borderRadius: "4px", border: "1px dashed #38bdf8" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Contraseña: </span>
+                  <code style={{ color: "#38bdf8", fontWeight: 700 }}>Admin2026*</code>
+                </div>
+              </div>
+
+              {/* Dr. Sebastián Ariza */}
+              <div style={{ background: "var(--parchment-deep)", border: "1px solid var(--line)", padding: "12px 14px", borderRadius: "6px" }}>
+                <span style={{ fontSize: "0.68rem", textTransform: "uppercase", color: "#4ade80", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                  ⚖️ Socio Administrador 2
+                </span>
+                <strong style={{ display: "block", color: "var(--text-bright)", fontSize: "0.9rem" }}>Dr. Felipe Sebastián Ariza</strong>
+                <p style={{ margin: "2px 0 6px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                  <code>{ADMIN_2_EMAIL}</code>
+                </p>
+                <div style={{ fontSize: "0.76rem", background: "var(--ink-soft)", padding: "6px 8px", borderRadius: "4px", border: "1px dashed #4ade80" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Contraseña: </span>
+                  <code style={{ color: "#4ade80", fontWeight: 700 }}>Admin2026*</code>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", borderTop: "1px solid var(--line)", paddingTop: "8px" }}>
+              💡 <em>Nota: Las cuentas de clientes creadas tienen por defecto la clave <code>Cliente2026*</code> (o la contraseña que tú le definas al crearlos abajo).</em>
+            </div>
+          </div>
+
+          {/* 2. DÓNDE SE VEN REFLEJADAS LAS CUENTAS EN SUPABASE */}
           <div
             style={{
               background: "rgba(56, 189, 248, 0.08)",
@@ -1079,30 +1165,31 @@ export function AdminDashboard({
             }}
           >
             <h4 style={{ margin: 0, fontSize: "0.95rem", color: "#38bdf8", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>✉️ ¿Cómo crear cuentas o enviar correos de invitación desde Supabase?</span>
+              <span>🌐 ¿Dónde veo reflejada la creación de cuentas de Supabase?</span>
             </h4>
             <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text)", lineHeight: 1.5 }}>
-              Para invitar a sus clientes o crearles cuenta directamente desde la nube de Supabase:
+              Las cuentas creadas se reflejan en <strong>dos lugares clave</strong>:
             </p>
             <ol style={{ margin: "4px 0 0", paddingLeft: "20px", fontSize: "0.8rem", color: "var(--text)", lineHeight: 1.6 }}>
               <li>
-                Abra su panel en <strong><a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" style={{ color: "#38bdf8" }}>https://supabase.com/dashboard</a></strong> y seleccione su proyecto.
-              </li>
-              <li>
-                En el menú de la izquierda, ingrese a <strong>Authentication → Users</strong>.
-              </li>
-              <li>
-                Haga clic en el botón verde superior <strong>"Add User"</strong>:
-                <ul style={{ marginTop: "4px" }}>
-                  <li><strong>"Send invite"</strong>: Supabase enviará un correo automático para que el cliente configure su propia contraseña.</li>
-                  <li><strong>"Create user"</strong>: Crea el correo y contraseña directamente para entregársela al cliente.</li>
+                <strong>En el Panel de Supabase en la Nube (https://supabase.com/dashboard):</strong>
+                <ul style={{ marginTop: "3px" }}>
+                  <li>
+                    <strong>Authentication → Users:</strong> Aquí se reflejan las credenciales de inicio de sesión con su correo electrónico, fecha de creación y su <code>User UID</code>.
+                  </li>
+                  <li>
+                    <strong>Table Editor → public.profiles:</strong> Aquí se refleja la tabla de perfiles con nombre completo, rol (<code>firm</code> para abogados y <code>client</code> para clientes), cédula y teléfono.
+                  </li>
+                  <li>
+                    <strong>Table Editor → public.cases:</strong> Aquí se reflejan los procesos asignados a cada cliente mediante su <code>client_email</code> o <code>client_id</code>.
+                  </li>
                 </ul>
               </li>
               <li>
-                <strong>Tip de Acceso Inmediato:</strong> En <em>Authentication → Providers → Email</em>, desmarque la opción <em>"Confirm email"</em> si prefiere que los clientes entren de inmediato sin esperar confirmación por correo.
+                <strong>En esta misma pantalla (Directorio abajo):</strong> Cada vez que creas un cliente aquí, se guarda tanto en Supabase como en la memoria del portal con su botón para vincularle un caso de inmediato.
               </li>
               <li>
-                Al crearse el usuario, copie su <strong>User UID</strong> y úselo como ID de cliente al vincular un caso aquí.
+                <strong>Sincronización en 1 Clic:</strong> Si creaste usuarios antes de conectar Supabase, ve a la pestaña <strong>"Conexión Supabase"</strong> y haz clic en <strong>"🚀 Sincronizar todos los datos a Supabase ahora"</strong> para que todas las cuentas se inserten en tus tablas de Supabase al instante.
               </li>
             </ol>
           </div>
@@ -1412,7 +1499,23 @@ export function AdminDashboard({
               </button>
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px" }}>
+            <>
+              {passwordChangeFeedback && (
+                <div
+                  style={{
+                    padding: "10px 16px",
+                    background: "rgba(34, 197, 94, 0.15)",
+                    border: "1px solid #22c55e",
+                    color: "#4ade80",
+                    borderRadius: "4px",
+                    fontSize: "0.82rem",
+                    fontWeight: 600,
+                  }}
+                >
+                  ✓ {passwordChangeFeedback}
+                </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px" }}>
               {filteredUsers.map((u) => {
               const isSuper = u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
               const clientCases = allCases.filter(
@@ -1511,6 +1614,140 @@ export function AdminDashboard({
                         {copiedId === u.id ? "¡Copiado!" : "Copiar"}
                       </button>
                     </div>
+
+                    {/* Bloque de Contraseña y Gestión de Clave */}
+                    <div
+                      style={{
+                        background: "var(--ink-soft)",
+                        border: "1px solid var(--line)",
+                        padding: "8px 10px",
+                        borderRadius: "4px",
+                        marginTop: "8px",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>
+                          Contraseña de Acceso:
+                        </span>
+                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRevealedPasswords((prev) => ({ ...prev, [u.id]: !prev[u.id] }))
+                            }
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: "var(--brass-light)",
+                              fontSize: "0.7rem",
+                              cursor: "pointer",
+                              padding: 0,
+                            }}
+                          >
+                            {revealedPasswords[u.id] ? "🙈 Ocultar" : "👁️ Ver clave"}
+                          </button>
+
+                          {userCanCreate && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingPasswordUserId(editingPasswordUserId === u.id ? null : u.id);
+                                setEditedPasswordValue(u.password || (u.role === "firm" ? "Admin2026*" : "Cliente2026*"));
+                                setPasswordChangeFeedback(null);
+                              }}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#38bdf8",
+                                fontSize: "0.7rem",
+                                cursor: "pointer",
+                                padding: 0,
+                              }}
+                            >
+                              ✏️ Cambiar
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: "3px" }}>
+                        <code
+                          style={{
+                            fontSize: "0.82rem",
+                            color: "var(--brass-light)",
+                            letterSpacing: revealedPasswords[u.id] ? "normal" : "2px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {revealedPasswords[u.id]
+                            ? (u.password || (u.role === "firm" ? "Admin2026*" : "Cliente2026*"))
+                            : "••••••••••••"}
+                        </code>
+                      </div>
+
+                      {/* Editor en línea de contraseña */}
+                      {editingPasswordUserId === u.id && (
+                        <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: "1px dashed var(--line)" }}>
+                          <div style={{ display: "flex", gap: "6px" }}>
+                            <input
+                              type="text"
+                              value={editedPasswordValue}
+                              onChange={(e) => setEditedPasswordValue(e.target.value)}
+                              placeholder="Nueva contraseña"
+                              style={{
+                                flex: 1,
+                                padding: "4px 8px",
+                                fontSize: "0.75rem",
+                                background: "var(--parchment-deep)",
+                                border: "1px solid var(--brass)",
+                                borderRadius: "3px",
+                                color: "var(--text-bright)",
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!editedPasswordValue.trim()) return;
+                                const ok = updateUserPassword(u.id, editedPasswordValue.trim());
+                                if (ok) {
+                                  setPasswordChangeFeedback(`Clave actualizada para ${u.full_name}`);
+                                  setEditingPasswordUserId(null);
+                                  if (onRefreshUsers) onRefreshUsers();
+                                  setTimeout(() => setPasswordChangeFeedback(null), 3000);
+                                }
+                              }}
+                              style={{
+                                background: "var(--brass)",
+                                color: "var(--ink)",
+                                border: "none",
+                                borderRadius: "3px",
+                                padding: "4px 10px",
+                                fontSize: "0.72rem",
+                                fontWeight: 700,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingPasswordUserId(null)}
+                              style={{
+                                background: "transparent",
+                                color: "var(--text-muted)",
+                                border: "1px solid var(--line)",
+                                borderRadius: "3px",
+                                padding: "4px 8px",
+                                fontSize: "0.72rem",
+                                cursor: "pointer",
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
@@ -1556,6 +1793,7 @@ export function AdminDashboard({
               );
             })}
           </div>
+        </>
         )}
       </div>
     )}

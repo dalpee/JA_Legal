@@ -28,6 +28,9 @@ import {
   fetchProfilesOrUsers,
   fetchAllCasesFromDatabase,
   SUPER_ADMIN_EMAIL,
+  ADMIN_1_EMAIL,
+  ADMIN_2_EMAIL,
+  INITIAL_FIRM_ADMINS,
   loginWithCredentials,
   type StoredUser,
 } from "../lib/supabaseClient";
@@ -161,11 +164,41 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
       if (cancelled) return;
 
-      const isSuperAdmin = (session.user.email || "").toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
-      const userRole = isSuperAdmin ? "firm" : (session.user.user_metadata?.role || profileData?.role || "client");
-      const defaultName = isSuperAdmin ? "David Pérez" : (userRole === "firm" ? "David Pérez" : "Cliente Titular");
+      const userEmail = (session.user.email || "").toLowerCase().trim();
+      const isSuperAdmin = userEmail === SUPER_ADMIN_EMAIL.toLowerCase();
+      const isMarlon = userEmail === ADMIN_1_EMAIL.toLowerCase();
+      const isSebastian = userEmail === ADMIN_2_EMAIL.toLowerCase();
+      const isFirmMember = isSuperAdmin || isMarlon || isSebastian || userEmail === "contacto@jalegal.com.co";
+      const userRole = isFirmMember ? "firm" : (session.user.user_metadata?.role || profileData?.role || "client");
+
+      let defaultName = "Cliente Titular";
+      let defaultInitials = "CL";
+      let defaultIdNumber = "C.C. Registrada";
+      let defaultPhone = session.user.user_metadata?.phone || "";
+
+      if (isSuperAdmin) {
+        defaultName = "David Pérez";
+        defaultInitials = "DP";
+        defaultIdNumber = "Super Admin Titular";
+        defaultPhone = "+57 300 000 0000";
+      } else if (isMarlon) {
+        defaultName = "Dr. Marlon Jiménez";
+        defaultInitials = "MJ";
+        defaultIdNumber = "T.P. 182.904 del C.S.J. · Socio Administrador";
+        defaultPhone = "+57 312 214 9562";
+      } else if (isSebastian) {
+        defaultName = "Dr. Felipe Sebastián Ariza Gómez";
+        defaultInitials = "SA";
+        defaultIdNumber = "T.P. 195.420 del C.S.J. · Socio Administrador";
+        defaultPhone = "+57 315 220 1199";
+      } else if (userRole === "firm") {
+        defaultName = "Abogado J&A Legal";
+        defaultInitials = "JA";
+        defaultIdNumber = "Abogado Titular";
+      }
+
       const userName = session.user.user_metadata?.full_name || profileData?.full_name || defaultName;
-      const initials = userName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || (isSuperAdmin ? "DP" : "JA");
+      const initials = session.user.user_metadata?.initials || profileData?.initials || defaultInitials;
 
       const activeProfile: Profile = {
         id: session.user.id,
@@ -173,8 +206,8 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
         initials,
         role: userRole,
         email: session.user.email,
-        id_number: session.user.user_metadata?.id_number || (isSuperAdmin ? "Super Admin Titular" : (userRole === "firm" ? "Abogado Titular" : "C.C. Registrada")),
-        phone: session.user.user_metadata?.phone || "",
+        id_number: session.user.user_metadata?.id_number || defaultIdNumber,
+        phone: defaultPhone,
       };
 
       setProfile(activeProfile);
@@ -494,16 +527,16 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     }
   }
 
-  // Acceso directo con 1 clic para el Super Admin Titular (David Pérez)
-  async function handleQuickSuperAdminLogin() {
-    setEmail(SUPER_ADMIN_EMAIL);
+  // Acceso directo con 1 clic para cualquiera de los 3 Administradores
+  async function handleQuickLogin(targetEmail: string, targetName: string) {
+    setEmail(targetEmail);
     setPassword("Admin2026*");
     setAuthError(null);
-    setAuthSuccess("Accediendo como Super Administrador (David Pérez)…");
+    setAuthSuccess(`Iniciando sesión como ${targetName}…`);
     setSubmitting(true);
 
     try {
-      const res = await loginWithCredentials(SUPER_ADMIN_EMAIL, "Admin2026*");
+      const res = await loginWithCredentials(targetEmail, "Admin2026*");
       if (res.success && res.session) {
         setSession(res.session);
       } else {
@@ -514,6 +547,11 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Compatibilidad con invocación directa de David Pérez
+  async function handleQuickSuperAdminLogin() {
+    await handleQuickLogin(SUPER_ADMIN_EMAIL, "Super Administrador (David Pérez)");
   }
 
   async function handleLogout() {
@@ -649,10 +687,27 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                       fontWeight: 700,
                     }}
                   >
-                    <span>👥 Directorio de Clientes</span>
+                    <span>👥 Usuarios &amp; Cuentas</span>
                     <small style={{ color: "#38bdf8", fontWeight: 700 }}>
-                      {registeredUsersList.length > 0 ? registeredUsersList.length : getStoredUsers().length} usuarios
+                      Supabase ({registeredUsersList.length > 0 ? registeredUsersList.length : getStoredUsers().length})
                     </small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={activeSection === "admin" && adminSubTab === "conexion_supabase" ? "active" : ""}
+                    onClick={() => {
+                      setActiveSection("admin");
+                      setAdminSubTab("conexion_supabase");
+                    }}
+                    style={{
+                      borderLeft: activeSection === "admin" && adminSubTab === "conexion_supabase" ? "3px solid #eab308" : "none",
+                      background: activeSection === "admin" && adminSubTab === "conexion_supabase" ? "rgba(234, 179, 8, 0.18)" : "rgba(234, 179, 8, 0.05)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    <span>⚡ Conexión Supabase</span>
+                    <small style={{ color: "#eab308", fontWeight: 700 }}>SQL / Nube</small>
                   </button>
                 </>
               )}
@@ -1884,21 +1939,21 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
   // =========================================================================
   return (
     <main className="client-portal login-view">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: "420px", marginBottom: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: "480px", marginBottom: "16px" }}>
         <button type="button" onClick={handleBack} className="portal-back login-back" style={{ margin: 0 }}>
           ← Volver al sitio web principal
         </button>
         <ThemeToggle />
       </div>
 
-      <section className="portal-card login-card" style={{ maxWidth: "420px", padding: "32px 28px" }}>
-        <img src={logo} alt="Jiménez &amp; Ariza Asociados" className="portal-logo" style={{ maxWidth: "180px", margin: "0 auto 16px" }} />
+      <section className="portal-card login-card" style={{ maxWidth: "480px", padding: "28px 24px" }}>
+        <img src={logo} alt="Jiménez &amp; Ariza Asociados" className="portal-logo" style={{ maxWidth: "180px", margin: "0 auto 14px" }} />
 
         <p className="kicker" style={{ textAlign: "center" }}>Acceso Corporativo Seguro</p>
         <h1 style={{ fontSize: "1.35rem", marginBottom: "6px", textAlign: "center" }}>
           Portal de Clientes &amp; Despacho
         </h1>
-        <p className="portal-text" style={{ fontSize: "0.82rem", marginBottom: "22px", textAlign: "center", color: "var(--text-muted)" }}>
+        <p className="portal-text" style={{ fontSize: "0.82rem", marginBottom: "18px", textAlign: "center", color: "var(--text-muted)" }}>
           Ingrese sus credenciales autorizadas para consultar y gestionar sus expedientes judiciales.
         </p>
 
@@ -1906,83 +1961,240 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
         {authError && (
           <div style={{ marginBottom: "16px" }}>
             <p className="portal-form-error" style={{ marginBottom: "8px" }}>{authError}</p>
-            {email.toLowerCase().includes("eldavidprz") && (
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={handleQuickSuperAdminLogin}
+                onClick={() => handleQuickLogin(SUPER_ADMIN_EMAIL, "David Pérez")}
                 style={{
-                  background: "rgba(217, 181, 106, 0.2)",
+                  background: "rgba(217, 181, 106, 0.15)",
                   border: "1px solid var(--brass)",
                   color: "var(--brass-light)",
                   borderRadius: "4px",
-                  padding: "6px 12px",
-                  fontSize: "0.76rem",
-                  fontWeight: 600,
+                  padding: "5px 10px",
+                  fontSize: "0.72rem",
                   cursor: "pointer",
-                  width: "100%",
+                  flex: 1,
                 }}
               >
-                🔑 Ingresar automáticamente como Super Admin (Admin2026*)
+                ⚡ Ingresar como David
               </button>
-            )}
+              <button
+                type="button"
+                onClick={() => handleQuickLogin(ADMIN_1_EMAIL, "Dr. Marlon Jiménez")}
+                style={{
+                  background: "rgba(56, 189, 248, 0.15)",
+                  border: "1px solid #38bdf8",
+                  color: "#38bdf8",
+                  borderRadius: "4px",
+                  padding: "5px 10px",
+                  fontSize: "0.72rem",
+                  cursor: "pointer",
+                  flex: 1,
+                }}
+              >
+                ⚡ Ingresar como Dr. Marlon
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin(ADMIN_2_EMAIL, "Dr. Sebastián Ariza")}
+                style={{
+                  background: "rgba(74, 222, 128, 0.15)",
+                  border: "1px solid #4ade80",
+                  color: "#4ade80",
+                  borderRadius: "4px",
+                  padding: "5px 10px",
+                  fontSize: "0.72rem",
+                  cursor: "pointer",
+                  flex: 1,
+                }}
+              >
+                ⚡ Ingresar como Dr. Sebastián
+              </button>
+            </div>
           </div>
         )}
 
-        {/* TARJETA DE ACCESO RÁPIDO PARA SUPER ADMINISTRADOR */}
+        {/* ======================================================== */}
+        {/* PANEL: CLAVES DE LOS 3 ADMINISTRADORES (ACCESO DIRECTO)   */}
+        {/* ======================================================== */}
         <div
           style={{
-            background: "rgba(217, 181, 106, 0.08)",
+            background: "rgba(217, 181, 106, 0.06)",
             border: "1px solid rgba(217, 181, 106, 0.35)",
             borderRadius: "6px",
             padding: "14px 16px",
-            marginBottom: "20px",
+            marginBottom: "18px",
             textAlign: "left",
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
             <span style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--brass)", fontWeight: 700 }}>
-              Acceso Titular Autorizado
+              🔑 Claves de los 3 Administradores
             </span>
             <span style={{ fontSize: "0.68rem", background: "var(--brass)", color: "var(--ink)", padding: "2px 7px", borderRadius: "3px", fontWeight: 700 }}>
-              Super Admin
+              Clave Maestra: Admin2026*
             </span>
           </div>
 
-          <div style={{ fontSize: "0.78rem", color: "var(--text-bright)", lineHeight: 1.5, marginBottom: "10px" }}>
-            <p style={{ margin: 0 }}>
-              <strong>Usuario:</strong> <code style={{ color: "var(--brass-light)" }}>eldavidprz@gmail.com</code>
+          <p style={{ margin: "0 0 10px", fontSize: "0.76rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
+            Los 3 administradores tienen acceso total y la misma contraseña: <strong style={{ color: "var(--brass-light)" }}>Admin2026*</strong> (A mayúscula y asterisco).
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {/* 1. David Pérez */}
+            <div
+              style={{
+                background: "var(--parchment-deep)",
+                border: "1px solid var(--line)",
+                padding: "8px 10px",
+                borderRadius: "4px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "6px",
+              }}
+            >
+              <div>
+                <span style={{ fontSize: "0.68rem", color: "var(--brass)", fontWeight: 700, display: "block" }}>
+                  👑 Super Admin Titular
+                </span>
+                <strong style={{ fontSize: "0.82rem", color: "var(--text-bright)" }}>David Pérez</strong>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "block" }}>{SUPER_ADMIN_EMAIL}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin(SUPER_ADMIN_EMAIL, "David Pérez")}
+                disabled={submitting}
+                style={{
+                  background: "var(--brass)",
+                  color: "var(--ink)",
+                  border: "none",
+                  borderRadius: "3px",
+                  padding: "5px 10px",
+                  fontSize: "0.74rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                ⚡ Entrar
+              </button>
+            </div>
+
+            {/* 2. Dr. Marlon Jiménez */}
+            <div
+              style={{
+                background: "var(--parchment-deep)",
+                border: "1px solid var(--line)",
+                padding: "8px 10px",
+                borderRadius: "4px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "6px",
+              }}
+            >
+              <div>
+                <span style={{ fontSize: "0.68rem", color: "#38bdf8", fontWeight: 700, display: "block" }}>
+                  ⚖️ Socio Administrador 1
+                </span>
+                <strong style={{ fontSize: "0.82rem", color: "var(--text-bright)" }}>Dr. Marlon Jiménez</strong>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "block" }}>{ADMIN_1_EMAIL}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin(ADMIN_1_EMAIL, "Dr. Marlon Jiménez")}
+                disabled={submitting}
+                style={{
+                  background: "#38bdf8",
+                  color: "#0f172a",
+                  border: "none",
+                  borderRadius: "3px",
+                  padding: "5px 10px",
+                  fontSize: "0.74rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                ⚡ Entrar
+              </button>
+            </div>
+
+            {/* 3. Dr. Sebastián Ariza */}
+            <div
+              style={{
+                background: "var(--parchment-deep)",
+                border: "1px solid var(--line)",
+                padding: "8px 10px",
+                borderRadius: "4px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "6px",
+              }}
+            >
+              <div>
+                <span style={{ fontSize: "0.68rem", color: "#4ade80", fontWeight: 700, display: "block" }}>
+                  ⚖️ Socio Administrador 2
+                </span>
+                <strong style={{ fontSize: "0.82rem", color: "var(--text-bright)" }}>Dr. Felipe Sebastián Ariza</strong>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "block" }}>{ADMIN_2_EMAIL}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin(ADMIN_2_EMAIL, "Dr. Sebastián Ariza")}
+                disabled={submitting}
+                style={{
+                  background: "#4ade80",
+                  color: "#0f172a",
+                  border: "none",
+                  borderRadius: "3px",
+                  padding: "5px 10px",
+                  fontSize: "0.74rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                ⚡ Entrar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ======================================================== */}
+        {/* GUÍA RÁPIDA: DÓNDE SE REFLEJAN LAS CUENTAS EN SUPABASE   */}
+        {/* ======================================================== */}
+        <details
+          style={{
+            background: "rgba(56, 189, 248, 0.05)",
+            border: "1px solid rgba(56, 189, 248, 0.25)",
+            borderRadius: "6px",
+            padding: "10px 14px",
+            marginBottom: "18px",
+            fontSize: "0.78rem",
+            color: "var(--text)",
+            textAlign: "left",
+          }}
+        >
+          <summary style={{ cursor: "pointer", fontWeight: 700, color: "#38bdf8", outline: "none" }}>
+            🌐 ¿Dónde veo reflejada la creación de cuentas de Supabase?
+          </summary>
+          <div style={{ marginTop: "8px", lineHeight: 1.5, color: "var(--text-muted)" }}>
+            <p style={{ margin: "0 0 6px" }}>
+              <strong>1. En tu Consola de Supabase (supabase.com/dashboard):</strong>
             </p>
-            <p style={{ margin: "2px 0 0" }}>
-              <strong>Contraseña:</strong> <code style={{ color: "var(--brass-light)" }}>Admin2026*</code>{" "}
-              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>(A mayúscula y asterisco *)</span>
+            <ul style={{ margin: 0, paddingLeft: "18px" }}>
+              <li><strong>Authentication → Users:</strong> Credenciales y correo electrónico con su UID.</li>
+              <li><strong>Table Editor → profiles:</strong> Nombre completo, rol (<code style={{ color: "var(--brass-light)" }}>firm</code> o <code style={{ color: "var(--brass-light)" }}>client</code>), cédula y teléfono.</li>
+              <li><strong>Table Editor → cases:</strong> Casos asignados al correo del cliente.</li>
+            </ul>
+            <p style={{ margin: "8px 0 0" }}>
+              <strong>2. En este Portal:</strong> Ingresa con cualquiera de los 3 botones de arriba y ve a la pestaña <strong>"👥 Usuarios &amp; Cuentas"</strong> en el menú lateral.
             </p>
           </div>
-
-          <button
-            type="button"
-            onClick={handleQuickSuperAdminLogin}
-            disabled={submitting}
-            style={{
-              width: "100%",
-              background: "var(--brass)",
-              color: "var(--ink)",
-              border: "none",
-              borderRadius: "4px",
-              padding: "9px 12px",
-              fontSize: "0.8rem",
-              fontWeight: 700,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "8px",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-              transition: "all 0.15s ease",
-            }}
-          >
-            <span>⚡ Iniciar Sesión con 1 Clic (David Pérez)</span>
-          </button>
-        </div>
+        </details>
 
         {/* FORMULARIO MANUAL DE INICIO DE SESIÓN */}
         <form className="portal-form" onSubmit={handleLogin}>
