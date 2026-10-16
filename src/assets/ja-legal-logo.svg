@@ -1,104 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 76" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 70" fill="none">
   <defs>
-    <!-- Gradiente dorado metálico multicapa -->
-    <linearGradient id="navGold" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#fff0c7" />
-      <stop offset="25%" stop-color="#f5d278" />
-      <stop offset="50%" stop-color="#d49f39" />
-      <stop offset="75%" stop-color="#fae7a0" />
-      <stop offset="100%" stop-color="#b48220" />
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f2d790" />
+      <stop offset="50%" stop-color="#d9b56a" />
+      <stop offset="100%" stop-color="#a9812e" />
     </linearGradient>
-
-    <!-- Gradientes de desvanecimiento para las líneas de ASOCIADOS -->
-    <linearGradient id="navLineLeft" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#d49f39" stop-opacity="0" />
-      <stop offset="100%" stop-color="#f5d278" stop-opacity="1" />
-    </linearGradient>
-
-    <linearGradient id="navLineRight" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#f5d278" stop-opacity="1" />
-      <stop offset="100%" stop-color="#d49f39" stop-opacity="0" />
-    </linearGradient>
-
-    <filter id="navGlow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#d49f39" flood-opacity="0.2" />
-    </filter>
   </defs>
+  
+  <!-- Crest Icon -->
+  <g transform="translate(10, 8)">
+    <!-- Scale icon -->
+    <path d="M26 4 L26 48 M10 16 L42 16" stroke="url(#goldGrad)" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M10 16 L4 32 L16 32 Z" stroke="url(#goldGrad)" stroke-width="2" fill="none"/>
+    <path d="M42 16 L36 32 L48 32 Z" stroke="url(#goldGrad)" stroke-width="2" fill="none"/>
+    <path d="M18 48 L34 48" stroke="url(#goldGrad)" stroke-width="2.5" stroke-linecap="round"/>
+    <!-- Small star / diamond at top -->
+    <polygon points="26,1 28,4 26,7 24,4" fill="url(#goldGrad)"/>
+  </g>
 
-  <g filter="url(#navGlow)">
-    <!-- ======================================================== -->
-    <!-- 1. CRESTA EMBLEMA (IZQUIERDA)                           -->
-    <!-- ======================================================== -->
-    <g transform="translate(6, 4) scale(0.135)">
-      <!-- Balanza -->
-      <path d="M 250,55 L 254,67 L 250,81 L 246,67 Z" fill="url(#navGold)" />
-      <rect x="247.5" y="81" width="5" height="78" rx="2" fill="url(#navGold)" />
-      <circle cx="250" cy="98" r="6.5" fill="url(#navGold)" />
-      <path d="M 180,98 C 215,93 285,93 320,98" stroke="url(#navGold)" stroke-width="5" stroke-linecap="round" fill="none" />
-      
-      <!-- Platillo Izquierdo -->
-      <line x1="180" y1="98" x2="162" y2="138" stroke="url(#navGold)" stroke-width="2.5" />
-      <line x1="180" y1="98" x2="198" y2="138" stroke="url(#navGold)" stroke-width="2.5" />
-      <path d="M 156,138 C 160,151 200,151 204,138 Z" fill="url(#navGold)" />
-      <path d="M 154,138 L 206,138" stroke="url(#navGold)" stroke-width="2.5" />
-
-      <!-- Platillo Derecho -->
-      <line x1="320" y1="98" x2="302" y2="138" stroke="url(#navGold)" stroke-width="2.5" />
-      <line x1="320" y1="98" x2="338" y2="138" stroke="url(#navGold)" stroke-width="2.5" />
-      <path d="M 296,138 C 300,151 340,151 344,138 Z" fill="url(#navGold)" />
-      <path d="M 294,138 L 346,138" stroke="url(#navGold)" stroke-width="2.5" />
-
-      <!-- Monograma J&A -->
-      <!-- Letra J -->
-      <path d="M 152,176 L 202,176 L 202,188 L 186,188 L 186,252 C 186,274 174,290 148,290 C 128,290 116,278 114,266 L 126,262 C 128,270 136,277 148,277 C 164,277 172,265 172,248 L 172,188 L 152,188 Z" fill="url(#navGold)" />
-
-      <!-- Ampersand & -->
-      <path d="M 252,230 C 259,223 265,214 265,205 C 265,194 257,186 244,186 C 231,186 222,194 222,206 C 222,217 229,227 241,237 L 218,263 C 213,259 210,252 210,244 L 198,244 C 198,256 205,267 214,273 L 200,289 L 210,295 L 226,277 C 233,280 242,282 251,282 C 271,282 285,270 285,253 C 285,241 277,233 267,228 Z M 243,197 C 249,197 253,201 253,206 C 253,212 249,219 243,225 C 238,219 235,213 235,207 C 235,201 238,197 243,197 Z M 250,271 C 242,271 235,268 229,264 L 246,244 C 254,249 260,255 260,261 C 260,267 256,271 250,271 Z" fill="url(#navGold)" opacity="0.95" />
-
-      <!-- Letra A -->
-      <path d="M 314,176 L 328,176 L 372,288 L 358,288 L 347,258 L 297,258 L 286,288 L 272,288 Z M 302,245 L 342,245 L 322,191 Z" fill="url(#navGold)" />
-
-      <!-- Swoosh dinámico característico -->
-      <path d="M 194,250 C 220,292 268,302 316,274 C 352,254 382,258 398,261 C 374,272 338,292 296,292 C 244,292 210,270 194,250 Z" fill="url(#navGold)" />
-      <path d="M 292,247 C 334,242 372,252 396,262 C 370,257 336,252 294,255 Z" fill="url(#navGold)" />
-    </g>
-
-    <!-- ======================================================== -->
-    <!-- 2. TIPOGRAFÍA CORPORATIVA (DERECHA)                     -->
-    <!-- ======================================================== -->
-    <g transform="translate(86, 0)">
-      <!-- JIMÉNEZ & ARIZA -->
-      <text
-        x="0"
-        y="38"
-        font-family="'Source Serif 4', 'Cinzel', 'Playfair Display', Georgia, serif"
-        font-size="22"
-        font-weight="700"
-        letter-spacing="3.2"
-        fill="url(#navGold)"
-      >
-        JIMENEZ &amp; ARIZA
-      </text>
-
-      <!-- Línea decorativa izquierda -->
-      <line x1="0" y1="56" x2="52" y2="56" stroke="url(#navLineLeft)" stroke-width="1.6" stroke-linecap="round" />
-
-      <!-- ASOCIADOS -->
-      <text
-        x="132"
-        y="60"
-        text-anchor="middle"
-        font-family="'Cinzel', 'Source Serif 4', 'Inter', Georgia, serif"
-        font-size="10"
-        font-weight="600"
-        letter-spacing="6.5"
-        fill="url(#navGold)"
-      >
-        ASOCIADOS
-      </text>
-
-      <!-- Línea decorativa derecha -->
-      <line x1="212" y1="56" x2="264" y2="56" stroke="url(#navLineRight)" stroke-width="1.6" stroke-linecap="round" />
-    </g>
+  <!-- Typography -->
+  <g transform="translate(70, 16)">
+    <!-- Monogram J&A -->
+    <text x="0" y="22" font-family="'Source Serif 4', Georgia, serif" font-size="24" font-weight="700" fill="url(#goldGrad)" letter-spacing="2">J&amp;A</text>
+    
+    <!-- Firm Name -->
+    <text x="68" y="16" font-family="'Source Serif 4', Georgia, serif" font-size="14" font-weight="600" fill="#f4f1e8" letter-spacing="2.5">JIMÉNEZ &amp; ARIZA</text>
+    <text x="70" y="29" font-family="'Inter', sans-serif" font-size="8.5" font-weight="500" fill="#8891a3" letter-spacing="5">ASOCIADOS</text>
   </g>
 </svg>

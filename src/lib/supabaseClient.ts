@@ -1,5 +1,5 @@
 import { createClient, Session } from "@supabase/supabase-js";
-import { defaultProfile, defaultAgenda, defaultHistory, defaultDocuments, defaultFinances, excelCases } from "../data/initialData";
+import { defaultProfile, defaultAgenda, defaultHistory, defaultDocuments, defaultFinances } from "../data/initialData";
 import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem, FinancialRecord } from "../types/portal";
 
 // Super Admin Titular definido por el usuario
@@ -254,10 +254,7 @@ export function updateUserPassword(userIdOrEmail: string, newPassword: string): 
 export function getStoredFinances(): FinancialRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_FINANCES_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
+    if (raw) return JSON.parse(raw);
   } catch (e) {
     console.warn("Error reading stored finances", e);
   }
@@ -272,91 +269,14 @@ export function saveStoredFinances(data: FinancialRecord[]) {
   }
 }
 
-export async function syncFinancialRecordToDatabase(record: FinancialRecord) {
-  const current = getStoredFinances();
-  const idx = current.findIndex((f) => f.id === record.id);
-  const updated = idx >= 0 ? current.map((f) => (f.id === record.id ? record : f)) : [record, ...current];
-  saveStoredFinances(updated);
-
-  const cfg = getSupabaseConfig();
-  if (cfg.isConfigured) {
-    try {
-      const client = getRealSupabaseClient();
-      await client.from("financial_records").upsert({
-        id: record.id,
-        case_id: record.case_id || null,
-        client_id: record.client_id || null,
-        client_name: record.client_name || null,
-        type: record.type,
-        category: record.category,
-        concept: record.concept,
-        amount: record.amount,
-        total_pactado: record.total_pactado ?? record.amount,
-        abono_recibido: record.abono_recibido ?? (record.status === "completado" ? record.amount : 0),
-        saldo_pendiente: record.saldo_pendiente ?? 0,
-        forma_cobro: record.forma_cobro || record.payment_method,
-        pct_marlon: record.pct_marlon ?? 50,
-        pct_sebastian: record.pct_sebastian ?? 50,
-        marlon_recibe: record.marlon_recibe ?? 0,
-        sebastian_recibe: record.sebastian_recibe ?? 0,
-        payment_status: record.payment_status || (record.status === "completado" ? "Pagado" : "Pendiente"),
-        fecha_ultimo_abono: record.fecha_ultimo_abono || record.date,
-        date: record.date,
-        status: record.status,
-        payment_method: record.payment_method,
-        receipt_number: record.receipt_number,
-        notes: record.notes || null,
-      });
-    } catch (e) {
-      console.warn("Error syncing financial record to Supabase", e);
-    }
-  }
-}
-
-export async function deleteFinancialRecordFromDatabase(id: string) {
-  const current = getStoredFinances();
-  const updated = current.filter((f) => f.id !== id);
-  saveStoredFinances(updated);
-
-  const cfg = getSupabaseConfig();
-  if (cfg.isConfigured) {
-    try {
-      const client = getRealSupabaseClient();
-      await client.from("financial_records").delete().eq("id", id);
-    } catch (e) {
-      console.warn("Error deleting financial record from Supabase", e);
-    }
-  }
-}
-
-export async function fetchAllFinancesFromDatabase(): Promise<FinancialRecord[]> {
-  const cfg = getSupabaseConfig();
-  if (cfg.isConfigured) {
-    try {
-      const client = getRealSupabaseClient();
-      const { data, error } = await client.from("financial_records").select("*").order("date", { ascending: false });
-      if (!error && data && data.length > 0) {
-        saveStoredFinances(data);
-        return data;
-      }
-    } catch (e) {
-      console.warn("Could not fetch finances from Supabase, using local", e);
-    }
-  }
-  return getStoredFinances();
-}
-
 export function getStoredCases(): CaseRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_CASES_LIST_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
+    if (raw) return JSON.parse(raw);
   } catch (e) {
     console.warn("Error reading stored cases", e);
   }
-  return excelCases;
+  return [];
 }
 
 export function saveStoredCases(data: CaseRecord[]) {
@@ -1666,17 +1586,6 @@ ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS status TEXT DEFAUL
 ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS payment_method TEXT;
 ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS receipt_number TEXT;
 ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS notes TEXT;
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS total_pactado NUMERIC DEFAULT 0;
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS abono_recibido NUMERIC DEFAULT 0;
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS saldo_pendiente NUMERIC DEFAULT 0;
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS forma_cobro TEXT DEFAULT 'Transferencia';
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS pct_marlon NUMERIC DEFAULT 50;
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS pct_sebastian NUMERIC DEFAULT 50;
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS marlon_recibe NUMERIC DEFAULT 0;
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS sebastian_recibe NUMERIC DEFAULT 0;
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Pagado';
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS fecha_ultimo_abono TEXT;
-ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS case_name TEXT;
 ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 -- 7. FUNCIÓN Y TRIGGER: CREAR PERFIL AUTOMÁTICO AL REGISTRARSE
@@ -1689,20 +1598,14 @@ BEGIN
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)),
     UPPER(SUBSTRING(COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)), 1, 2)),
-    CASE 
-      WHEN LOWER(NEW.email) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co') THEN 'firm' 
-      ELSE COALESCE(NEW.raw_user_meta_data->>'role', 'client') 
-    END,
+    CASE WHEN LOWER(NEW.email) = 'eldavidprz@gmail.com' THEN 'firm' ELSE COALESCE(NEW.raw_user_meta_data->>'role', 'client') END,
     COALESCE(NEW.raw_user_meta_data->>'id_number', ''),
     COALESCE(NEW.raw_user_meta_data->>'phone', '')
   )
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
     full_name = COALESCE(EXCLUDED.full_name, public.profiles.full_name),
-    role = CASE 
-      WHEN LOWER(NEW.email) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co') THEN 'firm' 
-      ELSE EXCLUDED.role 
-    END;
+    role = CASE WHEN LOWER(NEW.email) = 'eldavidprz@gmail.com' THEN 'firm' ELSE EXCLUDED.role END;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -1738,18 +1641,7 @@ CREATE POLICY "Acceso total documents" ON public.documents FOR ALL USING (true) 
 DROP POLICY IF EXISTS "Acceso total finances" ON public.financial_records;
 CREATE POLICY "Acceso total finances" ON public.financial_records FOR ALL USING (true) WITH CHECK (true);
 
--- 9. INSERTAR / SINCRONIZAR LOS 3 ADMINISTRADORES TITULARES EN PUBLIC.PROFILES
-INSERT INTO public.profiles (id, email, full_name, initials, role, id_number, phone)
-VALUES 
-  ('00000000-0000-4000-a000-000000000001', 'eldavidprz@gmail.com', 'David Pérez', 'DP', 'firm', 'Super Admin Titular', '+57 300 000 0000'),
-  ('00000000-0000-4000-a000-000000000002', 'marlon.jimenez@jalegal.com.co', 'Dr. Marlon Jiménez', 'MJ', 'firm', 'T.P. 182.904 del C.S.J. · Socio Administrador', '+57 312 214 9562'),
-  ('00000000-0000-4000-a000-000000000003', 'sebastian.ariza@jalegal.com.co', 'Dr. Felipe Sebastián Ariza Gómez', 'SA', 'firm', 'T.P. 195.420 del C.S.J. · Socio Administrador', '+57 315 220 1199')
-ON CONFLICT (id) DO UPDATE SET
-  role = 'firm',
-  email = EXCLUDED.email,
-  full_name = EXCLUDED.full_name;
-
--- 10. SINCRONIZAR USUARIOS YA REGISTRADOS EN AUTH.USERS DE FORMA DINÁMICA
+-- 9. SINCRONIZAR USUARIOS YA REGISTRADOS EN AUTH.USERS DE FORMA DINÁMICA Y SEGURA
 DO $$
 BEGIN
   BEGIN
@@ -1760,31 +1652,30 @@ BEGIN
         email,
         COALESCE(raw_user_meta_data->>''full_name'', SPLIT_PART(email, ''@'', 1), ''Usuario''),
         UPPER(SUBSTRING(COALESCE(raw_user_meta_data->>''full_name'', SPLIT_PART(email, ''@'', 1), ''US''), 1, 2)),
-        CASE 
-          WHEN LOWER(email) IN (''eldavidprz@gmail.com'', ''marlon.jimenez@jalegal.com.co'', ''sebastian.ariza@jalegal.com.co'') THEN ''firm'' 
-          ELSE COALESCE(raw_user_meta_data->>''role'', ''client'') 
-        END,
+        CASE WHEN LOWER(email) = ''eldavidprz@gmail.com'' THEN ''firm'' ELSE COALESCE(raw_user_meta_data->>''role'', ''client'') END,
         COALESCE(raw_user_meta_data->>''id_number'', ''''),
         COALESCE(raw_user_meta_data->>''phone'', '''')
       FROM auth.users
       ON CONFLICT (id) DO UPDATE SET
         email = EXCLUDED.email,
-        role = CASE 
-          WHEN LOWER(EXCLUDED.email) IN (''eldavidprz@gmail.com'', ''marlon.jimenez@jalegal.com.co'', ''sebastian.ariza@jalegal.com.co'') THEN ''firm'' 
-          ELSE public.profiles.role 
-        END
+        role = CASE WHEN LOWER(EXCLUDED.email) = ''eldavidprz@gmail.com'' THEN ''firm'' ELSE public.profiles.role END
     ';
   EXCEPTION WHEN OTHERS THEN
     NULL;
   END;
 END $$;
 
--- Asegurar rol de administrador titular para los 3 correos
-UPDATE public.profiles 
-SET role = 'firm' 
-WHERE LOWER(email) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co');
+-- 10. ASEGURAR PRIVILEGIOS DE SUPER ADMINISTRADOR PARA ELDAVIDPRZ@GMAIL.COM
+DO $$
+BEGIN
+  BEGIN
+    EXECUTE 'UPDATE public.profiles SET role = ''firm'' WHERE LOWER(email) = ''eldavidprz@gmail.com''';
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
+END $$;
 
--- 11. BUCKET DE SUPABASE STORAGE Y POLÍTICAS PÚBLICAS PARA DOCUMENTOS DIGITALES
+-- 11. BUCKET DE SUPABASE STORAGE Y POLÍTICAS PÚBLICAS PARA DOCUMENTOS
 DO $$
 BEGIN
   -- Insertar bucket 'case-documents' si el esquema storage existe
@@ -1797,7 +1688,7 @@ BEGIN
       NULL;
     END;
 
-    -- Políticas permisivas de lectura, subida, edición y eliminación para el bucket case-documents
+    -- Políticas permisivas de lectura y subida para el bucket case-documents
     BEGIN
       DROP POLICY IF EXISTS "Lectura pública de case-documents" ON storage.objects;
       CREATE POLICY "Lectura pública de case-documents" ON storage.objects
@@ -1810,22 +1701,6 @@ BEGIN
       DROP POLICY IF EXISTS "Subida pública de case-documents" ON storage.objects;
       CREATE POLICY "Subida pública de case-documents" ON storage.objects
         FOR INSERT WITH CHECK (bucket_id = 'case-documents');
-    EXCEPTION WHEN OTHERS THEN
-      NULL;
-    END;
-
-    BEGIN
-      DROP POLICY IF EXISTS "Actualización de case-documents" ON storage.objects;
-      CREATE POLICY "Actualización de case-documents" ON storage.objects
-        FOR UPDATE USING (bucket_id = 'case-documents');
-    EXCEPTION WHEN OTHERS THEN
-      NULL;
-    END;
-
-    BEGIN
-      DROP POLICY IF EXISTS "Eliminación de case-documents" ON storage.objects;
-      CREATE POLICY "Eliminación de case-documents" ON storage.objects
-        FOR DELETE USING (bucket_id = 'case-documents');
     EXCEPTION WHEN OTHERS THEN
       NULL;
     END;

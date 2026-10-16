@@ -1,5 +1,6 @@
 import logo from "../assets/ja-legal-logo.svg";
 import { firm, navigation } from "../data/site";
+import { downloadWordDossier } from "../utils/downloadWordDossier";
 
 export function Footer() {
   return (
@@ -10,6 +11,28 @@ export function Footer() {
             <img src={logo} alt={firm.name} className="footer-logo" />
             <p>{firm.tagline}</p>
             <p className="footer-address">{firm.address}</p>
+            <div style={{ marginTop: "12px" }}>
+              <button
+                type="button"
+                onClick={downloadWordDossier}
+                style={{
+                  background: "transparent",
+                  border: "1px solid #5f4e29",
+                  borderColor: "#5f4e29",
+                  color: "var(--brass-light)",
+                  padding: "6px 12px",
+                  borderRadius: "3px",
+                  fontSize: "0.75rem",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <span>📥 Descargar Dossier (.doc / Word)</span>
+              </button>
+            </div>
           </div>
           <div className="footer-links-col">
             <p className="col-title">

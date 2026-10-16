@@ -177,15 +177,8 @@ p {
 }
 
 .brand .logo {
-  height: 44px;
+  height: 40px;
   width: auto;
-  max-width: 260px;
-  object-fit: contain;
-  transition: transform 0.2s ease;
-}
-
-.brand:hover .logo {
-  transform: scale(1.02);
 }
 
 /* Light Theme Logo Adaptation */
@@ -693,10 +686,7 @@ body.theme-light .brand .logo text[fill="#8891a3"] {
 }
 
 .footer-logo {
-  height: 48px;
-  width: auto;
-  max-width: 260px;
-  object-fit: contain;
+  height: 38px;
   margin-bottom: 16px;
 }
 

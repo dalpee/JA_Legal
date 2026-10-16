@@ -50,7 +50,6 @@ export type CaseRecord = {
   phases?: CasePhase[];
   counterparty?: string;
   observations?: string;
-  next_step?: string;
 };
 
 export type AgendaItem = {
@@ -79,24 +78,12 @@ export type HistoryItem = {
 export type FinancialRecord = {
   id: string;
   case_id?: string;
-  case_name?: string;
   client_id?: string;
   client_name?: string;
   type: "ingreso" | "egreso";
   category: "Honorarios" | "Anticipo" | "Cuota de Honorarios" | "Costas Procesales" | "Gastos Notaría / Registro" | "Peritaje Judicial" | "Viáticos y Transporte" | "Operativo Despacho";
   concept: string;
   amount: number;
-  // Campos del Modelo Excel de la Firma J&A Legal:
-  total_pactado?: number;
-  abono_recibido?: number;
-  saldo_pendiente?: number;
-  forma_cobro?: string;
-  pct_marlon?: number;
-  pct_sebastian?: number;
-  marlon_recibe?: number;
-  sebastian_recibe?: number;
-  payment_status?: "Pagado" | "Abono parcial" | "Pendiente";
-  fecha_ultimo_abono?: string;
   date: string;
   status: "completado" | "pendiente";
   payment_method: "Transferencia Bancaria" | "PSE" | "Efectivo" | "Cheque";
