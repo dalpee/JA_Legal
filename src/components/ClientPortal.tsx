@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import logo from "../assets/ja-legal-logo.svg";
+import emblemLogo from "../assets/ja-legal-emblem.svg";
 import {
   supabase,
   getStoredCase,
@@ -44,9 +45,10 @@ import { DocumentModal } from "./DocumentModal";
 import { FinanceSection } from "./FinanceSection";
 import { LegalCalculator } from "./LegalCalculator";
 import { SupabaseCasesTable } from "./SupabaseCasesTable";
+import { CaseDashboard } from "./CaseDashboard";
 import { SystemArchitectureModal } from "./SystemArchitectureModal";
 import { ThemeToggle } from "./ThemeToggle";
-import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText, Download } from "./icons";
+import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText, Download, Upload } from "./icons";
 import "./ClientPortal.css";
 
 interface ClientPortalProps {
@@ -98,9 +100,9 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [prefillClientName, setPrefillClientName] = useState("");
   const [registeredUsersList, setRegisteredUsersList] = useState<StoredUser[]>([]);
 
-  // Sección activa en el portal
+  // Sección activa en el portal (incluye nuevo tablero de casos CaseDashboard)
   const [activeSection, setActiveSection] = useState<
-    "resumen" | "proceso" | "agenda" | "documentos" | "historial" | "economia" | "calculadora" | "admin"
+    "resumen" | "tablero" | "proceso" | "agenda" | "documentos" | "historial" | "economia" | "calculadora" | "admin"
   >("resumen");
   const [adminSubTab, setAdminSubTab] = useState<"casos" | "clientes" | "conexion_supabase">("casos");
 
@@ -436,6 +438,12 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     saveStoredFinances(updated);
   };
 
+  const handleUpdateTransaction = (updatedRecord: FinancialRecord) => {
+    const updated = finances.map((f) => (f.id === updatedRecord.id ? updatedRecord : f));
+    setFinances(updated);
+    saveStoredFinances(updated);
+  };
+
   const handleApplyLiquidationToCase = (summary: string, totalAmount: number) => {
     if (caseRecord) {
       handleUpdateCase({
@@ -578,17 +586,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
     return (
       <main className="portal-dashboard">
-        {/* Barra superior de herramientas y simulación */}
-        <PresentationBanner
-          onOpenEditor={() => setIsEditorOpen(true)}
-          onLoadTemplate={handleLoadTemplate}
-          onPrintReport={handlePrintReport}
-          isPresentationMode={isPresentationMode}
-          onTogglePresentationMode={() => setIsPresentationMode(!isPresentationMode)}
-          userRole={profile.role}
-          onToggleRole={handleToggleRole}
-        />
-
         <header className="portal-topbar">
           <button type="button" onClick={handleBack} className="portal-back">
             ← Volver a la página
@@ -718,6 +715,21 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 onClick={() => setActiveSection("resumen")}
               >
                 <span>Resumen</span>
+              </button>
+
+              <button
+                type="button"
+                className={activeSection === "tablero" ? "active" : ""}
+                onClick={() => setActiveSection("tablero")}
+                style={{
+                  borderLeft: activeSection === "tablero" ? "3px solid #38bdf8" : "none",
+                  background: activeSection === "tablero" ? "rgba(56, 189, 248, 0.15)" : "transparent",
+                }}
+              >
+                <span>📋 Tablero de Casos</span>
+                <small style={{ color: "#38bdf8", fontWeight: 700 }}>
+                  CaseDashboard ({allCases.length})
+                </small>
               </button>
               <button
                 type="button"
@@ -927,29 +939,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={() => setIsArchModalOpen(true)}
-              style={{
-                background: "transparent",
-                border: "1px dashed var(--line)",
-                color: "var(--text-muted)",
-                fontSize: "0.72rem",
-                padding: "8px 10px",
-                borderRadius: "4px",
-                cursor: "pointer",
-                textAlign: "left",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                width: "100%",
-                transition: "all 0.2s ease",
-              }}
-              title="Ficha técnica de ingeniería de sistemas"
-            >
-              <span>📐 Especificación & Auditoría</span>
-            </button>
-
             <div
               style={{
                 padding: "8px 10px",
@@ -1016,8 +1005,32 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 finances={finances}
                 onAddTransaction={handleAddTransaction}
                 onDeleteTransaction={handleDeleteTransaction}
+                onUpdateTransaction={handleUpdateTransaction}
                 userProfile={profile}
                 caseRecord={caseRecord}
+              />
+            )}
+
+            {/* SECCIÓN NUEVA: TABLERO DE CASOS (CASEDASHBOARD) */}
+            {activeSection === "tablero" && (
+              <CaseDashboard
+                cases={allCases}
+                currentProfile={profile}
+                onSelectCase={(selected) => {
+                  setCaseRecord(selected);
+                  setActiveSection("resumen");
+                }}
+                onEditCase={(selected) => {
+                  setEditingCase(selected);
+                  setIsCreateCaseModalOpen(true);
+                }}
+                onDeleteCase={(cId) => {
+                  handleDeleteCase(cId);
+                }}
+                onNewCase={() => {
+                  setEditingCase(null);
+                  setIsCreateCaseModalOpen(true);
+                }}
               />
             )}
 
@@ -1039,7 +1052,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               />
             )}
 
-            {!loadingData && !caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && activeSection !== "proceso" && (
+            {!loadingData && !caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && activeSection !== "proceso" && activeSection !== "tablero" && (
               <div className="portal-empty" style={{ textAlign: "center", padding: "48px 24px" }}>
                 <span style={{ fontSize: "2.8rem", display: "block", marginBottom: "14px" }}>
                   {isFirm ? "⚖️" : "📂"}
@@ -1305,7 +1318,8 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
                 {/* TAB: RESUMEN */}
                 {activeSection === "resumen" && (
-                  <div className="portal-main-grid">
+                  <>
+                    <div className="portal-main-grid">
                     {/* Próximas Citas y Audiencias */}
                     <article className="portal-panel">
                       <div className="panel-title-row">
@@ -1387,7 +1401,173 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                       </button>
                     </article>
                   </div>
-                )}
+
+                  {/* ADJUNTADOR DE ARCHIVOS A LA VISTA EN EL DETALLE DEL CASO */}
+                  <article
+                    className="portal-panel"
+                    style={{
+                      marginTop: "20px",
+                      border: "2px dashed var(--brass)",
+                      borderRadius: "8px",
+                      padding: "20px",
+                      background: "var(--ink-soft)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: "10px",
+                        marginBottom: "14px",
+                      }}
+                    >
+                      <div>
+                        <p className="kicker" style={{ color: "var(--brass)", margin: 0 }}>
+                          Expediente Digital Oficial &amp; Adjuntador
+                        </p>
+                        <h3 style={{ margin: "4px 0 0", color: "var(--text-bright)", fontSize: "1.15rem" }}>
+                          Documentos &amp; Pruebas del Caso ({documents.filter((d) => !d.case_id || d.case_id === caseRecord.id).length})
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsAddDocModalOpen(true)}
+                        className="btn primary"
+                        style={{
+                          padding: "8px 16px",
+                          fontSize: "0.8rem",
+                          fontWeight: 700,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}
+                      >
+                        <Upload size={14} />
+                        <span>+ Adjuntar Archivo a la Vista</span>
+                      </button>
+                    </div>
+
+                    <p style={{ margin: "0 0 14px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                      Archivos oficiales almacenados en Supabase Storage (autos, providencias, poderes, demandas y constancias de pago).
+                    </p>
+
+                    {documents.filter((d) => !d.case_id || d.case_id === caseRecord.id).length === 0 ? (
+                      <div
+                        style={{
+                          textAlign: "center",
+                          padding: "24px",
+                          background: "var(--parchment-deep)",
+                          borderRadius: "6px",
+                          border: "1px dashed var(--line)",
+                        }}
+                      >
+                        <p style={{ margin: "0 0 10px", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                          Aún no hay archivos adjuntos en este proceso.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddDocModalOpen(true)}
+                          className="btn primary"
+                          style={{ padding: "6px 14px", fontSize: "0.78rem" }}
+                        >
+                          + Adjuntar Primer Archivo
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "10px" }}>
+                        {documents
+                          .filter((d) => !d.case_id || d.case_id === caseRecord.id)
+                          .map((doc) => (
+                            <div
+                              key={doc.id}
+                              style={{
+                                background: "var(--parchment-deep)",
+                                border: "1px solid var(--line)",
+                                borderRadius: "6px",
+                                padding: "10px 14px",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                            >
+                              <div style={{ overflow: "hidden", display: "flex", alignItems: "center", gap: "8px" }}>
+                                <FileText size={18} color="var(--brass)" />
+                                <div>
+                                  <strong
+                                    style={{
+                                      color: "var(--text-bright)",
+                                      fontSize: "0.82rem",
+                                      display: "block",
+                                      textOverflow: "ellipsis",
+                                      overflow: "hidden",
+                                      whiteSpace: "nowrap",
+                                      maxWidth: "160px",
+                                    }}
+                                  >
+                                    {doc.name}
+                                  </strong>
+                                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                                    {doc.category} · {doc.file_size || "1.2 MB"}
+                                  </span>
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: "6px" }}>
+                                {doc.download_url && (
+                                  <a
+                                    href={doc.download_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      padding: "4px 8px",
+                                      background: "rgba(217, 181, 106, 0.2)",
+                                      color: "var(--brass-light)",
+                                      border: "1px solid var(--brass)",
+                                      borderRadius: "4px",
+                                      fontSize: "0.72rem",
+                                      fontWeight: 600,
+                                      textDecoration: "none",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "3px",
+                                    }}
+                                  >
+                                    <Download size={12} />
+                                    <span>Ver</span>
+                                  </a>
+                                )}
+                                {isFirm && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (window.confirm(`¿Eliminar documento "${doc.name}"?`)) {
+                                        await deleteDocumentFromDatabase(doc.id);
+                                        const updatedDocs = documents.filter((d) => d.id !== doc.id);
+                                        setDocuments(updatedDocs);
+                                      }
+                                    }}
+                                    style={{
+                                      background: "transparent",
+                                      border: "1px solid rgba(239, 68, 68, 0.4)",
+                                      color: "#f87171",
+                                      borderRadius: "4px",
+                                      padding: "4px 6px",
+                                      cursor: "pointer",
+                                    }}
+                                    title="Eliminar archivo"
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </article>
+                </>
+              )}
 
                 {/* TAB: CALENDARIO */}
                 {activeSection === "agenda" && (
@@ -1947,7 +2127,18 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
       </div>
 
       <section className="portal-card login-card" style={{ maxWidth: "480px", padding: "28px 24px" }}>
-        <img src={logo} alt="Jiménez &amp; Ariza Asociados" className="portal-logo" style={{ maxWidth: "180px", margin: "0 auto 14px" }} />
+        <img
+          src={emblemLogo}
+          alt="Jiménez &amp; Ariza Asociados"
+          className="portal-logo"
+          style={{
+            maxWidth: "140px",
+            height: "auto",
+            margin: "0 auto 16px",
+            display: "block",
+            filter: "drop-shadow(0 4px 14px rgba(212, 159, 57, 0.28))",
+          }}
+        />
 
         <p className="kicker" style={{ textAlign: "center" }}>Acceso Corporativo Seguro</p>
         <h1 style={{ fontSize: "1.35rem", marginBottom: "6px", textAlign: "center" }}>
