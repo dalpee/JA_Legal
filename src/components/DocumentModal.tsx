@@ -1,6 +1,6 @@
 import React from "react";
 import { DocumentItem, CaseRecord } from "../types/portal";
-import { X, Download, FileText, CheckCircle2 } from "./icons";
+import { X, Download, FileText } from "./icons";
 
 interface DocumentModalProps {
   document: DocumentItem | null;
@@ -10,6 +10,9 @@ interface DocumentModalProps {
 
 export function DocumentModal({ document, caseRecord, onClose }: DocumentModalProps) {
   if (!document) return null;
+  const fileUrl = document.download_url;
+  const isPdf = Boolean(fileUrl && (fileUrl.startsWith("data:application/pdf") || document.name.toLowerCase().endsWith(".pdf")));
+  const isImage = Boolean(fileUrl && (fileUrl.startsWith("data:image/") || /\.(png|jpe?g|gif|webp)$/i.test(document.name)));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
@@ -33,41 +36,24 @@ export function DocumentModal({ document, caseRecord, onClose }: DocumentModalPr
             <h3 className="text-base sm:text-lg font-semibold text-white truncate max-w-md">
               {document.name}
             </h3>
+            <p className="text-xs text-slate-400 mt-1">{caseRecord.title} · Radicado: {caseRecord.radicado || caseRecord.id}</p>
           </div>
         </div>
 
-        {/* Legal Document Mock Viewer Sheet */}
-        <div className="bg-slate-950 p-6 rounded-xl border border-slate-800/80 space-y-4 font-serif text-slate-300 text-xs sm:text-sm leading-relaxed max-h-72 overflow-y-auto">
-          <div className="text-center border-b border-slate-800 pb-3 not-italic font-sans">
-            <p className="text-xs uppercase font-bold tracking-widest text-amber-400">
-              REPÚBLICA DE COLOMBIA · RAMA JUDICIAL DEL PODER PÚBLICO
-            </p>
-            <p className="text-xs text-slate-400 mt-0.5">{caseRecord.authority}</p>
-            <p className="text-[11px] font-mono text-slate-400 mt-1">
-              Radicación: {caseRecord.filed_date}
-            </p>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <p className="font-semibold text-amber-200">
-              PROCESO: {caseRecord.title} ({caseRecord.process_type})
-            </p>
-            <p>
-              <strong>DEMANDANTE:</strong> Roberto Mendoza Vargas y/o J&A Legal
-            </p>
-            <p>
-              <strong>DEMANDADO:</strong> {caseRecord.counterparty || "Parte contraparte procesal"}
-            </p>
-            <p className="italic text-slate-400 border-l-2 border-amber-500/40 pl-3 my-2">
-              &quot;En mérito de lo expuesto y de conformidad con lo previsto en el Código General del
-              Proceso y las normas concordantes vigentes, se procede a incorporar al expediente la
-              presente pieza procesal con plenos efectos jurídicos...&quot;
-            </p>
-            <div className="flex items-center gap-2 text-xs text-emerald-400 pt-2 font-sans font-semibold">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Documento cotejado y verificado con firma electrónica certificada</span>
+        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 min-h-48 max-h-[60vh] overflow-auto flex items-center justify-center">
+          {fileUrl && isPdf ? (
+            <iframe title={document.name} src={fileUrl} className="w-full h-[55vh] rounded-lg bg-white" />
+          ) : fileUrl && isImage ? (
+            <img src={fileUrl} alt={document.name} className="max-w-full max-h-[55vh] object-contain" />
+          ) : fileUrl ? (
+            <div className="text-center text-slate-300"><FileText className="w-10 h-10 mx-auto mb-3 text-amber-400" /><p>El archivo está listo para descargar.</p></div>
+          ) : (
+            <div className="text-center text-slate-300">
+              <FileText className="w-10 h-10 mx-auto mb-3 text-slate-500" />
+              <p className="font-semibold">Este registro no tiene un archivo adjunto.</p>
+              <p className="text-xs text-slate-400 mt-2">Solicita al despacho que cargue el documento digital para poder visualizarlo o descargarlo.</p>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
@@ -77,45 +63,16 @@ export function DocumentModal({ document, caseRecord, onClose }: DocumentModalPr
             <span className="text-amber-400 font-semibold">{document.status}</span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (document.download_url) {
-                const a = window.document.createElement("a");
-                a.href = (document as any).download_url;
-                a.download = document.name;
-                window.document.body.appendChild(a);
-                a.click();
-                window.document.body.removeChild(a);
-              } else {
-                // Generar copia digital descargable de la pieza procesal
-                const content = `REPÚBLICA DE COLOMBIA · RAMA JUDICIAL DEL PODER PÚBLICO
-${caseRecord.authority || "JUZGADO CIVIL DEL CIRCUITO"}
-RADICACIÓN: ${caseRecord.filed_date || caseRecord.radicado || caseRecord.id}
-PROCESO: ${caseRecord.title} (${caseRecord.process_type})
-DOCUMENTO: ${document.name}
-CATEGORÍA: ${document.category}
-FECHA INCORPORACIÓN: ${document.uploaded_at}
-ESTADO: ${document.status}
-
-EXPEDIENTE DIGITAL - J&A LEGAL ASOCIADOS
-Copia íntegra autorizada y registrada en la base de datos de gestión procesal.`;
-                const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-                const url = URL.createObjectURL(blob);
-                const a = window.document.createElement("a");
-                a.href = url;
-                a.download = document.name.endsWith(".txt") || document.name.endsWith(".pdf") ? document.name : `${document.name}.txt`;
-                window.document.body.appendChild(a);
-                a.click();
-                window.document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-              }
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors cursor-pointer"
+          {fileUrl && <a
+            href={fileUrl}
+            download={document.name}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors cursor-pointer no-underline"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Descargar Archivo</span>
-          </button>
+          </a>}
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { CaseRecord, Profile, DocumentItem } from "../types/portal";
 import {
   uploadDocumentToSupabaseStorage,
@@ -23,6 +23,7 @@ import {
   X,
   Plus,
 } from "./icons";
+import { getPartnerKey, isCaseAssignedToPartner } from "../lib/caseAssignment";
 
 interface CaseDashboardProps {
   cases: CaseRecord[];
@@ -69,10 +70,12 @@ export function CaseDashboard({
   // Estados de búsqueda y ordenamiento
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [caseScope, setCaseScope] = useState<"all" | "mine">("all");
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "balance_desc" | "name_asc">("date_desc");
+  const partnerKey = getPartnerKey(currentProfile);
 
   // Estado del caso detallado seleccionado (para mostrar a la vista con el adjuntador de archivos)
-  const [detailedCase, setDetailedCase] = useState<CaseRecord | null>(cases[0] || null);
+  const [detailedCase, setDetailedCase] = useState<CaseRecord | null>(null);
   const [caseDocuments, setCaseDocuments] = useState<DocumentItem[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
 
@@ -89,10 +92,21 @@ export function CaseDashboard({
     return cases.filter((c) => {
       if (c.client_email && c.client_email.toLowerCase().trim() === clientEmail) return true;
       if (c.client_id && currentProfile?.id && c.client_id === currentProfile.id) return true;
-      if (c.client_name && currentProfile?.full_name && c.client_name.toLowerCase().includes(currentProfile.full_name.toLowerCase())) return true;
-      return true; // Si es el usuario demo o asignado, mostrar
+      return false;
     });
   }, [cases, isFirm, clientEmail, currentProfile]);
+
+  useEffect(() => {
+    if (!accessibleCases.length) {
+      setDetailedCase(null);
+      setCaseDocuments([]);
+      return;
+    }
+    if (!detailedCase || !accessibleCases.some((caseRecord) => caseRecord.id === detailedCase.id)) {
+      setDetailedCase(accessibleCases[0]);
+      setCaseDocuments([]);
+    }
+  }, [accessibleCases, detailedCase?.id]);
 
   // Cargar documentos del caso detallado
   const loadDocuments = async (cId: string) => {
@@ -171,6 +185,7 @@ export function CaseDashboard({
   const filteredCases = useMemo(() => {
     return accessibleCases
       .filter((c) => {
+        if (caseScope === "mine" && (!partnerKey || !isCaseAssignedToPartner(c, partnerKey))) return false;
         // Filtro de búsqueda
         if (searchTerm.trim()) {
           const q = searchTerm.toLowerCase();
@@ -217,7 +232,7 @@ export function CaseDashboard({
         }
         return 0;
       });
-  }, [accessibleCases, searchTerm, statusFilter, sortBy]);
+  }, [accessibleCases, searchTerm, statusFilter, sortBy, caseScope, partnerKey]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -284,6 +299,21 @@ export function CaseDashboard({
       >
         {/* Buscador */}
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1 1 280px" }}>
+          {partnerKey && (
+            <div role="group" aria-label="Filtrar expedientes por abogado" style={{ display: "inline-flex", flex: "0 0 auto", gap: "4px", padding: "3px", border: "1px solid var(--line)", borderRadius: "6px", background: "var(--ink-soft)" }}>
+              {(["all", "mine"] as const).map((scope) => (
+                <button
+                  key={scope}
+                  type="button"
+                  aria-pressed={caseScope === scope}
+                  onClick={() => setCaseScope(scope)}
+                  style={{ padding: "7px 10px", border: "none", borderRadius: "4px", background: caseScope === scope ? "var(--brass)" : "transparent", color: caseScope === scope ? "var(--ink)" : "var(--text-muted)", fontSize: "0.8rem", fontWeight: 700, cursor: "pointer" }}
+                >
+                  {scope === "all" ? "Todos los casos" : "Mis casos"}
+                </button>
+              ))}
+            </div>
+          )}
           <Search size={16} color="var(--brass)" />
           <input
             type="text"
@@ -370,6 +400,7 @@ export function CaseDashboard({
       >
         <div style={{ overflowX: "auto" }}>
           <table
+            className="portal-data-table"
             style={{
               width: "100%",
               borderCollapse: "collapse",
@@ -597,7 +628,7 @@ export function CaseDashboard({
       {/* ======================================================== */}
       {/* VISTA DETALLADA DEL CASO CON EL ADJUNTADOR DE ARCHIVOS A LA VISTA */}
       {/* ======================================================== */}
-      {detailedCase && (
+      {detailedCase && accessibleCases.some((caseRecord) => caseRecord.id === detailedCase.id) && (
         <section
           style={{
             background: "var(--ink-soft)",

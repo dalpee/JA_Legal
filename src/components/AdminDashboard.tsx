@@ -3,10 +3,11 @@ import { CaseRecord } from "../types/portal";
 import {
   StoredUser,
   SUPER_ADMIN_EMAIL,
-  ADMIN_1_EMAIL,
-  ADMIN_2_EMAIL,
+  LOGIN_EMAIL_DOMAIN,
+  normalizeLoginUsername,
   canCreateAccounts,
   createUserAccount,
+  updateUserProfile,
   deleteUserAccount,
   getSupabaseConfig,
   saveSupabaseConfig,
@@ -16,7 +17,6 @@ import {
   syncDocumentToDatabase,
   saveStoredCase,
   SUPABASE_SQL_SETUP_SCRIPT,
-  updateUserPassword,
 } from "../lib/supabaseClient";
 
 interface AdminDashboardProps {
@@ -55,10 +55,12 @@ export function AdminDashboard({
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
-  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
-  const [editingPasswordUserId, setEditingPasswordUserId] = useState<string | null>(null);
-  const [editedPasswordValue, setEditedPasswordValue] = useState("");
-  const [passwordChangeFeedback, setPasswordChangeFeedback] = useState<string | null>(null);
+  const [visiblePasswordUsers, setVisiblePasswordUsers] = useState<Record<string, boolean>>({});
+  const [editingUser, setEditingUser] = useState<StoredUser | null>(null);
+  const [editProfile, setEditProfile] = useState({ username: "", full_name: "", role: "client" as "client" | "firm", id_number: "", phone: "" });
+  const [editProfileError, setEditProfileError] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
   // Validación estricta: solo Super Admin y los 2 Administradores de la firma pueden crear cuentas
   const userCanCreate = canCreateAccounts(currentUser);
@@ -71,8 +73,9 @@ export function AdminDashboard({
 
   // Estados para crear un nuevo usuario desde el AdminDashboard
   const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
-  const [newEmail, setNewEmail] = useState("");
-  const [newPassword, setNewPassword] = useState("Cliente2026*");
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [newFullName, setNewFullName] = useState("");
   const [newRole, setNewRole] = useState<"client" | "firm">("client");
   const [newIdNumber, setNewIdNumber] = useState("");
@@ -220,13 +223,18 @@ export function AdminDashboard({
     if (!userCanCreate) {
       setUserCreationFeedback({
         type: "error",
-        text: `Acceso restringido: Solo el Super Admin (${SUPER_ADMIN_EMAIL}) y los 2 Socios Administradores (${ADMIN_1_EMAIL}, ${ADMIN_2_EMAIL}) pueden crear nuevas cuentas.`,
+        text: "Acceso restringido: solo los administradores autorizados pueden crear nuevas cuentas.",
       });
       return;
     }
 
-    if (!newEmail.trim() || !newFullName.trim()) {
-      setUserCreationFeedback({ type: "error", text: "El correo y el nombre completo son obligatorios." });
+    const username = normalizeLoginUsername(newUsername);
+    if (!username || !newFullName.trim()) {
+      setUserCreationFeedback({ type: "error", text: "El usuario y el nombre completo son obligatorios." });
+      return;
+    }
+    if (newUsername.includes("@") || !/^[a-z0-9][a-z0-9._-]*$/.test(username)) {
+      setUserCreationFeedback({ type: "error", text: "Use una abreviatura sencilla, por ejemplo marlon.jimenez, sin espacios." });
       return;
     }
 
@@ -234,7 +242,8 @@ export function AdminDashboard({
     try {
       const res = await createUserAccount(
         {
-          email: newEmail.trim(),
+          email: `${username}@${LOGIN_EMAIL_DOMAIN}`,
+          username,
           password: newPassword,
           full_name: newFullName.trim(),
           role: newRole,
@@ -247,16 +256,17 @@ export function AdminDashboard({
       if (res.success) {
         setUserCreationFeedback({
           type: "success",
-          text: `Usuario ${newFullName} (${newEmail}) creado exitosamente con rol ${newRole === "firm" ? "Abogado" : "Cliente"}.`,
+          text: `Cuenta ${newFullName} creada. Usuario para iniciar sesión: ${username}.`,
         });
-        setNewEmail("");
+        setNewUsername("");
         setNewFullName("");
         setNewIdNumber("");
         setNewPhone("");
-        setNewPassword("Cliente2026*");
+        setNewPassword("");
         if (onRefreshUsers) onRefreshUsers();
       } else {
         setUserCreationFeedback({ type: "error", text: res.message || "No se pudo crear el usuario." });
+        if (res.user && onRefreshUsers) onRefreshUsers();
       }
     } catch (err: any) {
       setUserCreationFeedback({ type: "error", text: err.message || "Error al crear el usuario." });
@@ -267,12 +277,13 @@ export function AdminDashboard({
 
   // Eliminar usuario
   const handleDeleteUser = async (userId: string, userEmail: string) => {
+    const userLabel = registeredUsers.find((user) => user.id === userId)?.username || registeredUsers.find((user) => user.id === userId)?.full_name || "este usuario";
     if (userEmail.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
-      alert("No se puede eliminar la cuenta del Super Admin titular (eldavidprz@gmail.com).");
+      alert("No se puede eliminar la cuenta del Super Admin titular.");
       return;
     }
     const confirmDelete = window.confirm(
-      `¿Está seguro de eliminar al usuario ${userEmail}? Sus expedientes asignados permanecerán pero el usuario ya no podrá iniciar sesión.`
+      `¿Está seguro de eliminar al usuario ${userLabel}? Sus expedientes asignados permanecerán, pero ya no podrá iniciar sesión.`
     );
     if (!confirmDelete) return;
 
@@ -281,6 +292,59 @@ export function AdminDashboard({
       if (onRefreshUsers) onRefreshUsers();
     } catch (e: any) {
       alert(e.message || "Error eliminando usuario.");
+    }
+  };
+
+  const openUserEditor = (user: StoredUser) => {
+    setEditingUser(user);
+    setEditProfile({
+      username: user.username || user.email.split("@")[0],
+      full_name: user.full_name || "",
+      role: user.role,
+      id_number: user.id_number || "",
+      phone: user.phone || "",
+    });
+    setEditProfileError("");
+    setShowEditPassword(false);
+  };
+
+  const handleSaveUserProfile = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingUser) return;
+    const username = normalizeLoginUsername(editProfile.username);
+    if (!username || editProfile.username.includes("@") || !/^[a-z0-9][a-z0-9._-]*$/.test(username)) {
+      setEditProfileError("Escribe una abreviatura válida, por ejemplo marlon.jimenez, sin espacios.");
+      return;
+    }
+    if (!editProfile.full_name.trim()) {
+      setEditProfileError("El nombre completo es obligatorio.");
+      return;
+    }
+    const duplicateUsername = registeredUsers.some((user) =>
+      user.id !== editingUser.id && normalizeLoginUsername(user.username || user.email.split("@")[0]) === username
+    );
+    if (duplicateUsername) {
+      setEditProfileError("Esa abreviatura ya está asignada a otra cuenta.");
+      return;
+    }
+
+    setSavingProfile(true);
+    setEditProfileError("");
+    try {
+      await updateUserProfile(editingUser, {
+        username,
+        full_name: editProfile.full_name.trim(),
+        initials: editProfile.full_name.trim().split(/\s+/).map((part) => part[0]).join("").toUpperCase().slice(0, 2),
+        role: canCreateAccounts({ email: editingUser.email }) ? "firm" : editProfile.role,
+        id_number: editProfile.id_number.trim(),
+        phone: editProfile.phone.trim(),
+      });
+      if (onRefreshUsers) onRefreshUsers();
+      setEditingUser(null);
+    } catch (error: any) {
+      setEditProfileError(error?.message || "No se pudo guardar el perfil.");
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -331,14 +395,14 @@ export function AdminDashboard({
       if (!term) return matchRole;
 
       const name = (u.full_name || "").toLowerCase();
-      const email = (u.email || "").toLowerCase();
       const id = (u.id || "").toLowerCase();
       const doc = (u.id_number || "").toLowerCase();
       const phone = (u.phone || "").toLowerCase();
+      const username = (u.username || "").toLowerCase();
 
       const matchTerm =
         name.includes(term) ||
-        email.includes(term) ||
+        username.includes(term) ||
         id.includes(term) ||
         doc.includes(term) ||
         phone.includes(term);
@@ -377,7 +441,7 @@ export function AdminDashboard({
               Módulo del Super Admin Titular
             </span>
             <span style={{ background: "rgba(217, 181, 106, 0.2)", color: "var(--brass)", fontSize: "0.7rem", padding: "2px 8px", borderRadius: "10px", fontWeight: 700 }}>
-              👑 {SUPER_ADMIN_EMAIL}
+              👑 Administrador autorizado
             </span>
           </div>
           <h2 style={{ margin: "4px 0 6px", fontSize: "1.5rem", color: "var(--text-bright)", fontFamily: "var(--font-heading)" }}>
@@ -1025,129 +1089,6 @@ export function AdminDashboard({
       {/* ======================================================== */}
       {activeTab === "clientes" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* 1. PANEL DE CLAVES Y CREDENCIALES DE LOS ADMINISTRADORES */}
-          <div
-            style={{
-              background: "rgba(217, 181, 106, 0.08)",
-              border: "1px solid var(--brass)",
-              borderRadius: "8px",
-              padding: "18px 22px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "12px",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "1.2rem" }}>🔑</span>
-                <h4 style={{ margin: 0, fontSize: "1.05rem", color: "var(--brass-light)" }}>
-                  Claves de Acceso de los 3 Administradores de J&amp;A Legal
-                </h4>
-              </div>
-              <span style={{ fontSize: "0.72rem", background: "var(--brass)", color: "var(--ink)", padding: "2px 8px", borderRadius: "3px", fontWeight: 800 }}>
-                Firma Autorizada
-              </span>
-            </div>
-
-            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
-              Tanto el Super Admin titular como los dos Socios Administradores tienen acceso total para gestionar expedientes y crear nuevas cuentas.
-            </p>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px", marginTop: "4px" }}>
-              {/* David Pérez */}
-              <div style={{ background: "var(--parchment-deep)", border: "1px solid var(--line)", padding: "12px 14px", borderRadius: "6px" }}>
-                <span style={{ fontSize: "0.68rem", textTransform: "uppercase", color: "var(--brass)", fontWeight: 700, display: "block", marginBottom: "4px" }}>
-                  👑 Super Admin Titular
-                </span>
-                <strong style={{ display: "block", color: "var(--text-bright)", fontSize: "0.9rem" }}>David Pérez</strong>
-                <p style={{ margin: "2px 0 6px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                  <code>{SUPER_ADMIN_EMAIL}</code>
-                </p>
-                <div style={{ fontSize: "0.76rem", background: "var(--ink-soft)", padding: "6px 8px", borderRadius: "4px", border: "1px dashed var(--brass)" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Contraseña: </span>
-                  <code style={{ color: "var(--brass-light)", fontWeight: 700 }}>Admin2026*</code>
-                </div>
-              </div>
-
-              {/* Dr. Marlon Jiménez */}
-              <div style={{ background: "var(--parchment-deep)", border: "1px solid var(--line)", padding: "12px 14px", borderRadius: "6px" }}>
-                <span style={{ fontSize: "0.68rem", textTransform: "uppercase", color: "#38bdf8", fontWeight: 700, display: "block", marginBottom: "4px" }}>
-                  ⚖️ Socio Administrador 1
-                </span>
-                <strong style={{ display: "block", color: "var(--text-bright)", fontSize: "0.9rem" }}>Dr. Marlon Jiménez</strong>
-                <p style={{ margin: "2px 0 6px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                  <code>{ADMIN_1_EMAIL}</code>
-                </p>
-                <div style={{ fontSize: "0.76rem", background: "var(--ink-soft)", padding: "6px 8px", borderRadius: "4px", border: "1px dashed #38bdf8" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Contraseña: </span>
-                  <code style={{ color: "#38bdf8", fontWeight: 700 }}>Admin2026*</code>
-                </div>
-              </div>
-
-              {/* Dr. Sebastián Ariza */}
-              <div style={{ background: "var(--parchment-deep)", border: "1px solid var(--line)", padding: "12px 14px", borderRadius: "6px" }}>
-                <span style={{ fontSize: "0.68rem", textTransform: "uppercase", color: "#4ade80", fontWeight: 700, display: "block", marginBottom: "4px" }}>
-                  ⚖️ Socio Administrador 2
-                </span>
-                <strong style={{ display: "block", color: "var(--text-bright)", fontSize: "0.9rem" }}>Dr. Felipe Sebastián Ariza</strong>
-                <p style={{ margin: "2px 0 6px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                  <code>{ADMIN_2_EMAIL}</code>
-                </p>
-                <div style={{ fontSize: "0.76rem", background: "var(--ink-soft)", padding: "6px 8px", borderRadius: "4px", border: "1px dashed #4ade80" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Contraseña: </span>
-                  <code style={{ color: "#4ade80", fontWeight: 700 }}>Admin2026*</code>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", borderTop: "1px solid var(--line)", paddingTop: "8px" }}>
-              💡 <em>Nota: Las cuentas de clientes creadas tienen por defecto la clave <code>Cliente2026*</code> (o la contraseña que tú le definas al crearlos abajo).</em>
-            </div>
-          </div>
-
-          {/* 2. DÓNDE SE VEN REFLEJADAS LAS CUENTAS EN SUPABASE */}
-          <div
-            style={{
-              background: "rgba(56, 189, 248, 0.08)",
-              border: "1px solid rgba(56, 189, 248, 0.25)",
-              padding: "16px 20px",
-              borderRadius: "6px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            }}
-          >
-            <h4 style={{ margin: 0, fontSize: "0.95rem", color: "#38bdf8", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>🌐 ¿Dónde veo reflejada la creación de cuentas de Supabase?</span>
-            </h4>
-            <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text)", lineHeight: 1.5 }}>
-              Las cuentas creadas se reflejan en <strong>dos lugares clave</strong>:
-            </p>
-            <ol style={{ margin: "4px 0 0", paddingLeft: "20px", fontSize: "0.8rem", color: "var(--text)", lineHeight: 1.6 }}>
-              <li>
-                <strong>En el Panel de Supabase en la Nube (https://supabase.com/dashboard):</strong>
-                <ul style={{ marginTop: "3px" }}>
-                  <li>
-                    <strong>Authentication → Users:</strong> Aquí se reflejan las credenciales de inicio de sesión con su correo electrónico, fecha de creación y su <code>User UID</code>.
-                  </li>
-                  <li>
-                    <strong>Table Editor → public.profiles:</strong> Aquí se refleja la tabla de perfiles con nombre completo, rol (<code>firm</code> para abogados y <code>client</code> para clientes), cédula y teléfono.
-                  </li>
-                  <li>
-                    <strong>Table Editor → public.cases:</strong> Aquí se reflejan los procesos asignados a cada cliente mediante su <code>client_email</code> o <code>client_id</code>.
-                  </li>
-                </ul>
-              </li>
-              <li>
-                <strong>En esta misma pantalla (Directorio abajo):</strong> Cada vez que creas un cliente aquí, se guarda tanto en Supabase como en la memoria del portal con su botón para vincularle un caso de inmediato.
-              </li>
-              <li>
-                <strong>Sincronización en 1 Clic:</strong> Si creaste usuarios antes de conectar Supabase, ve a la pestaña <strong>"Conexión Supabase"</strong> y haz clic en <strong>"🚀 Sincronizar todos los datos a Supabase ahora"</strong> para que todas las cuentas se inserten en tus tablas de Supabase al instante.
-              </li>
-            </ol>
-          </div>
-
           {/* Barra superior de gestión de usuarios */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
             <div>
@@ -1155,7 +1096,7 @@ export function AdminDashboard({
                 Directorio de Usuarios & Cuentas Registradas ({registeredUsers.length})
               </h3>
               <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                <strong style={{ color: "var(--brass)" }}>Acceso de Creación Restringido:</strong> Solo el Super Admin Titular (<strong>{SUPER_ADMIN_EMAIL}</strong>) y los 2 Administradores de la firma pueden crear cuentas en el sistema.
+                <strong style={{ color: "var(--brass)" }}>Acceso de creación restringido:</strong> solo los administradores autorizados pueden crear cuentas.
               </p>
             </div>
 
@@ -1194,7 +1135,7 @@ export function AdminDashboard({
                   gap: "6px",
                 }}
               >
-                <span>🔒 Creación restringida (Solo Super Admin {SUPER_ADMIN_EMAIL} y los 2 Admins de la firma)</span>
+                <span>🔒 Creación restringida a los administradores autorizados</span>
               </div>
             )}
           </div>
@@ -1259,16 +1200,21 @@ export function AdminDashboard({
 
                 <div>
                   <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
-                    Correo Electrónico *
+                    Usuario de ingreso *
                   </label>
                   <input
-                    type="email"
+                    type="text"
                     required
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                    placeholder="cliente@ejemplo.com"
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value)}
+                    placeholder="marlon.jimenez"
+                    autoComplete="off"
+                    pattern="[A-Za-z0-9][A-Za-z0-9._-]*"
                     style={{ width: "100%", padding: "8px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
                   />
+                  <small style={{ display: "block", marginTop: "4px", color: "var(--text-muted)", fontSize: "0.68rem" }}>
+                    Para ingresar solo se necesita esta abreviatura y la contraseña.
+                  </small>
                 </div>
 
                 <div>
@@ -1276,13 +1222,21 @@ export function AdminDashboard({
                     Contraseña Inicial *
                   </label>
                   <input
-                    type="text"
+                    type={showNewPassword ? "text" : "password"}
                     required
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Defina una contraseña de 6 caracteres o más"
                     style={{ width: "100%", padding: "8px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((visible) => !visible)}
+                    aria-label={showNewPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    style={{ marginTop: "6px", padding: 0, background: "transparent", border: "none", color: "var(--brass-light)", fontSize: "0.74rem", cursor: "pointer" }}
+                  >
+                    {showNewPassword ? "🙈 Ocultar contraseña" : "👁️ Ver contraseña"}
+                  </button>
                 </div>
 
                 <div>
@@ -1364,7 +1318,7 @@ export function AdminDashboard({
                 type="text"
                 value={userSearchTerm}
                 onChange={(e) => setUserSearchTerm(e.target.value)}
-                placeholder="🔍 Buscar cliente por nombre, correo, cédula o ID de Supabase…"
+                placeholder="🔍 Buscar usuario por nombre, abreviatura, cédula o ID…"
                 style={{
                   width: "100%",
                   padding: "8px 12px",
@@ -1454,24 +1408,10 @@ export function AdminDashboard({
             </div>
           ) : (
             <>
-              {passwordChangeFeedback && (
-                <div
-                  style={{
-                    padding: "10px 16px",
-                    background: "rgba(34, 197, 94, 0.15)",
-                    border: "1px solid #22c55e",
-                    color: "#4ade80",
-                    borderRadius: "4px",
-                    fontSize: "0.82rem",
-                    fontWeight: 600,
-                  }}
-                >
-                  ✓ {passwordChangeFeedback}
-                </div>
-              )}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px" }}>
               {filteredUsers.map((u) => {
               const isSuper = u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+              const isAccountAdmin = canCreateAccounts({ email: u.email });
               const clientCases = allCases.filter(
                 (c) => c.client_id === u.id || (c.client_email && c.client_email.toLowerCase() === u.email.toLowerCase())
               );
@@ -1496,6 +1436,10 @@ export function AdminDashboard({
                         <span style={{ fontSize: "0.72rem", background: "var(--brass)", color: "var(--ink)", padding: "2px 8px", borderRadius: "3px", fontWeight: 800 }}>
                           👑 Super Admin Titular
                         </span>
+                      ) : isAccountAdmin ? (
+                        <span style={{ fontSize: "0.72rem", background: "rgba(217, 181, 106, 0.15)", color: "var(--brass)", padding: "2px 8px", borderRadius: "3px", fontWeight: 700 }}>
+                          🛡️ Administrador
+                        </span>
                       ) : u.role === "firm" ? (
                         <span style={{ fontSize: "0.72rem", background: "rgba(217, 181, 106, 0.15)", color: "var(--brass)", padding: "2px 8px", borderRadius: "3px", fontWeight: 700 }}>
                           ⚖️ Abogado / Firma
@@ -1514,9 +1458,30 @@ export function AdminDashboard({
                     <h4 style={{ margin: "0 0 4px", fontSize: "1.05rem", color: "var(--text-bright)" }}>
                       {u.full_name}
                     </h4>
-                    <p style={{ margin: "0 0 6px", fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                      {u.email}
+                    <p style={{ margin: "0 0 8px", fontSize: "0.76rem", color: "var(--text-muted)" }}>
+                      Usuario de ingreso: <strong style={{ color: "var(--text-bright)" }}>{u.username || u.email.split("@")[0]}</strong>
                     </p>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 10px", fontSize: "0.78rem" }}>
+                      <span style={{ color: "var(--text-muted)" }}>Contraseña:</span>
+                      {u.password ? (
+                        <>
+                          <code style={{ color: "var(--text-bright)" }}>
+                            {visiblePasswordUsers[u.id] ? u.password : "••••••••"}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => setVisiblePasswordUsers((current) => ({ ...current, [u.id]: !current[u.id] }))}
+                            aria-label={visiblePasswordUsers[u.id] ? `Ocultar contraseña de ${u.full_name}` : `Mostrar contraseña de ${u.full_name}`}
+                            style={{ background: "transparent", border: "none", color: "var(--brass-light)", cursor: "pointer", padding: "2px 4px" }}
+                          >
+                            {visiblePasswordUsers[u.id] ? "🙈 Ocultar" : "👁️ Ver"}
+                          </button>
+                        </>
+                      ) : (
+                        <span style={{ color: "var(--text-muted)" }}>No disponible para consultar</span>
+                      )}
+                    </div>
 
                     {u.id_number && (
                       <p style={{ margin: "0 0 6px", fontSize: "0.74rem", color: "var(--text)" }}>
@@ -1569,142 +1534,16 @@ export function AdminDashboard({
                       </button>
                     </div>
 
-                    {/* Bloque de Contraseña y Gestión de Clave */}
-                    <div
-                      style={{
-                        background: "var(--ink-soft)",
-                        border: "1px solid var(--line)",
-                        padding: "8px 10px",
-                        borderRadius: "4px",
-                        marginTop: "8px",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>
-                          Contraseña de Acceso:
-                        </span>
-                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setRevealedPasswords((prev) => ({ ...prev, [u.id]: !prev[u.id] }))
-                            }
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: "var(--brass-light)",
-                              fontSize: "0.7rem",
-                              cursor: "pointer",
-                              padding: 0,
-                            }}
-                          >
-                            {revealedPasswords[u.id] ? "🙈 Ocultar" : "👁️ Ver clave"}
-                          </button>
-
-                          {userCanCreate && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingPasswordUserId(editingPasswordUserId === u.id ? null : u.id);
-                                setEditedPasswordValue(u.password || (u.role === "firm" ? "Admin2026*" : "Cliente2026*"));
-                                setPasswordChangeFeedback(null);
-                              }}
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                color: "#38bdf8",
-                                fontSize: "0.7rem",
-                                cursor: "pointer",
-                                padding: 0,
-                              }}
-                            >
-                              ✏️ Cambiar
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div style={{ marginTop: "3px" }}>
-                        <code
-                          style={{
-                            fontSize: "0.82rem",
-                            color: "var(--brass-light)",
-                            letterSpacing: revealedPasswords[u.id] ? "normal" : "2px",
-                            fontWeight: 700,
-                          }}
-                        >
-                          {revealedPasswords[u.id]
-                            ? (u.password || (u.role === "firm" ? "Admin2026*" : "Cliente2026*"))
-                            : "••••••••••••"}
-                        </code>
-                      </div>
-
-                      {/* Editor en línea de contraseña */}
-                      {editingPasswordUserId === u.id && (
-                        <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: "1px dashed var(--line)" }}>
-                          <div style={{ display: "flex", gap: "6px" }}>
-                            <input
-                              type="text"
-                              value={editedPasswordValue}
-                              onChange={(e) => setEditedPasswordValue(e.target.value)}
-                              placeholder="Nueva contraseña"
-                              style={{
-                                flex: 1,
-                                padding: "4px 8px",
-                                fontSize: "0.75rem",
-                                background: "var(--parchment-deep)",
-                                border: "1px solid var(--brass)",
-                                borderRadius: "3px",
-                                color: "var(--text-bright)",
-                              }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!editedPasswordValue.trim()) return;
-                                const ok = updateUserPassword(u.id, editedPasswordValue.trim());
-                                if (ok) {
-                                  setPasswordChangeFeedback(`Clave actualizada para ${u.full_name}`);
-                                  setEditingPasswordUserId(null);
-                                  if (onRefreshUsers) onRefreshUsers();
-                                  setTimeout(() => setPasswordChangeFeedback(null), 3000);
-                                }
-                              }}
-                              style={{
-                                background: "var(--brass)",
-                                color: "var(--ink)",
-                                border: "none",
-                                borderRadius: "3px",
-                                padding: "4px 10px",
-                                fontSize: "0.72rem",
-                                fontWeight: 700,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Guardar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingPasswordUserId(null)}
-                              style={{
-                                background: "transparent",
-                                color: "var(--text-muted)",
-                                border: "1px solid var(--line)",
-                                borderRadius: "3px",
-                                padding: "4px 8px",
-                                fontSize: "0.72rem",
-                                cursor: "pointer",
-                              }}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
                   </div>
 
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
+                    <button
+                      type="button"
+                      onClick={() => openUserEditor(u)}
+                      style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--text-bright)", fontWeight: 700, fontSize: "0.75rem", padding: "7px 12px", borderRadius: "4px", cursor: "pointer", flex: "1 1 120px" }}
+                    >
+                      ✏️ Editar perfil
+                    </button>
                     <button
                       type="button"
                       onClick={() => onCreateNewCase(u.id, u.email, u.full_name)}
@@ -2244,6 +2083,78 @@ export function AdminDashboard({
           </div>
         </div>
       )}
+
+      {editingUser && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setEditingUser(null); }}
+          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(3, 8, 18, 0.78)", display: "grid", placeItems: "center", padding: "18px" }}
+        >
+          <form
+            onSubmit={handleSaveUserProfile}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="user-profile-editor-title"
+            style={{ width: "min(100%, 620px)", maxHeight: "90vh", overflowY: "auto", background: "var(--ink-soft)", border: "1px solid var(--brass)", borderRadius: "10px", padding: "22px", boxShadow: "0 18px 50px rgba(0,0,0,.45)", display: "flex", flexDirection: "column", gap: "14px" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+              <div>
+                <h3 id="user-profile-editor-title" style={{ margin: 0, color: "var(--brass-light)" }}>Editar perfil de usuario</h3>
+                <p style={{ margin: "5px 0 0", color: "var(--text-muted)", fontSize: "0.8rem" }}>{editingUser.full_name}</p>
+              </div>
+              <button type="button" onClick={() => setEditingUser(null)} aria-label="Cerrar editor" style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "1.1rem" }}>✕</button>
+            </div>
+
+            {editProfileError && <div role="alert" style={{ padding: "10px 12px", borderRadius: "5px", color: "#f87171", background: "rgba(239,68,68,.12)", border: "1px solid rgba(239,68,68,.35)", fontSize: "0.82rem" }}>{editProfileError}</div>}
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: "5px", color: "var(--text-bright)", fontSize: "0.78rem" }}>
+                Usuario o abreviatura de ingreso
+                <input type="text" required value={editProfile.username} onChange={(event) => setEditProfile((current) => ({ ...current, username: event.target.value }))} placeholder="ej. marlon.jimenez" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" style={{ width: "100%", padding: "9px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px" }} />
+                <small style={{ color: "var(--text-muted)" }}>Se puede usar este nombre corto para iniciar sesión.</small>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "5px", color: "var(--text-bright)", fontSize: "0.78rem" }}>
+                Nombre completo
+                <input type="text" required value={editProfile.full_name} onChange={(event) => setEditProfile((current) => ({ ...current, full_name: event.target.value }))} style={{ width: "100%", padding: "9px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "5px", color: "var(--text-bright)", fontSize: "0.78rem" }}>
+                Rol
+                <select value={canCreateAccounts({ email: editingUser.email }) ? "firm" : editProfile.role} disabled={canCreateAccounts({ email: editingUser.email })} onChange={(event) => setEditProfile((current) => ({ ...current, role: event.target.value as "client" | "firm" }))} style={{ width: "100%", padding: "9px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px" }}>
+                  <option value="client">Cliente</option>
+                  <option value="firm">Abogado / Firma</option>
+                </select>
+                {canCreateAccounts({ email: editingUser.email }) && <small style={{ color: "var(--text-muted)" }}>Cuenta administradora protegida.</small>}
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "5px", color: "var(--text-bright)", fontSize: "0.78rem" }}>
+                Documento o cédula
+                <input type="text" value={editProfile.id_number} onChange={(event) => setEditProfile((current) => ({ ...current, id_number: event.target.value }))} style={{ width: "100%", padding: "9px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "5px", color: "var(--text-bright)", fontSize: "0.78rem" }}>
+                Teléfono
+                <input type="tel" value={editProfile.phone} onChange={(event) => setEditProfile((current) => ({ ...current, phone: event.target.value }))} style={{ width: "100%", padding: "9px 10px", background: "var(--parchment-deep)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px" }} />
+              </label>
+            </div>
+
+            <div style={{ background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "5px", padding: "11px 12px" }}>
+              <div style={{ color: "var(--text-bright)", fontSize: "0.78rem", marginBottom: "5px" }}>Contraseña</div>
+              {editingUser.password ? (
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <code style={{ color: "var(--brass-light)" }}>{showEditPassword ? editingUser.password : "••••••••"}</code>
+                  <button type="button" onClick={() => setShowEditPassword((visible) => !visible)} style={{ background: "transparent", border: "none", color: "var(--brass-light)", cursor: "pointer" }}>{showEditPassword ? "🙈 Ocultar" : "👁️ Ver contraseña"}</button>
+                </div>
+              ) : (
+                <small style={{ color: "var(--text-muted)" }}>Supabase no permite consultar la contraseña actual. Para cambiarla, restablécela desde Authentication → Users en Supabase.</small>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", paddingTop: "6px" }}>
+              <button type="button" onClick={() => setEditingUser(null)} style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--text-bright)", padding: "9px 14px", borderRadius: "4px", cursor: "pointer" }}>Cancelar</button>
+              <button type="submit" disabled={savingProfile} style={{ background: "var(--brass)", border: "none", color: "var(--ink)", fontWeight: 700, padding: "9px 18px", borderRadius: "4px", cursor: "pointer" }}>{savingProfile ? "Guardando…" : "Guardar perfil"}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
+

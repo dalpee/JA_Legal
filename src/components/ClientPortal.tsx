@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import logo from "../assets/ja-legal-logo.svg";
-import emblemLogo from "../assets/ja-legal-emblem.svg";
+import companyLogo from "../assets/ja-legal-login-logo.png";
 import {
   supabase,
   getStoredCase,
@@ -32,9 +32,9 @@ import {
   SUPER_ADMIN_EMAIL,
   ADMIN_1_EMAIL,
   ADMIN_2_EMAIL,
+  FIRM_ADMIN_EMAILS,
   INITIAL_FIRM_ADMINS,
   loginWithCredentials,
-  registerDirectClientAccount,
   type StoredUser,
 } from "../lib/supabaseClient";
 import { defaultProfile, firmProfile, caseTemplates } from "../data/initialData";
@@ -43,6 +43,7 @@ import { CreateCaseModal } from "./CreateCaseModal";
 import { AdminDashboard } from "./AdminDashboard";
 import { PresentationBanner } from "./PresentationBanner";
 import { DocumentModal } from "./DocumentModal";
+import { CaseEditorDrawer } from "./CaseEditorDrawer";
 import { FinanceSection } from "./FinanceSection";
 import { LegalCalculator } from "./LegalCalculator";
 import { SupabaseCasesTable } from "./SupabaseCasesTable";
@@ -76,6 +77,30 @@ function formatLong(dateStr: string | null) {
     });
   } catch {
     return dateStr;
+  }
+}
+
+async function syncListToSupabase(
+  table: "agenda_items" | "history_items",
+  caseId: string,
+  items: Array<{ id: string }>
+) {
+  if (!isConfiguredWithRealSupabase) return;
+  const { data: existing, error: readError } = await supabase
+    .from(table)
+    .select("id")
+    .eq("case_id", caseId);
+  if (readError) throw readError;
+
+  const keepIds = new Set(items.map((item) => item.id));
+  const deleteIds = (existing ?? []).map((item: { id: string }) => item.id).filter((id: string) => !keepIds.has(id));
+  if (deleteIds.length) {
+    const { error } = await supabase.from(table).delete().in("id", deleteIds);
+    if (error) throw error;
+  }
+  if (items.length) {
+    const { error } = await supabase.from(table).upsert(items.map((item) => ({ ...item, case_id: caseId })));
+    if (error) throw error;
   }
 }
 
@@ -124,14 +149,11 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [docDataUrl, setDocDataUrl] = useState<string | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
-  // Estados de Autenticación (Solo cuentas creadas, con registro directo sin validación para clientes)
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  // Estados de autenticación para el formulario de inicio de sesión
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [registerName, setRegisterName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Estado de conexión continua y sincronización en tiempo real
@@ -201,8 +223,12 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       const isSuperAdmin = userEmail === SUPER_ADMIN_EMAIL.toLowerCase();
       const isMarlon = userEmail === ADMIN_1_EMAIL.toLowerCase();
       const isSebastian = userEmail === ADMIN_2_EMAIL.toLowerCase();
-      const isFirmMember = isSuperAdmin || isMarlon || isSebastian || userEmail === "contacto@jalegal.com.co";
-      const userRole = isFirmMember ? "firm" : (session.user.user_metadata?.role || profileData?.role || "client");
+      const isFirmMember = FIRM_ADMIN_EMAILS.includes(userEmail) || profileData?.role === "firm";
+      const userRole = isFirmMember
+        ? "firm"
+        : isConfiguredWithRealSupabase
+          ? "client"
+          : session.user.user_metadata?.role || profileData?.role || "client";
 
       let defaultName = "Cliente Titular";
       let defaultInitials = "CL";
@@ -246,7 +272,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       setProfile(activeProfile);
 
       // Cargar lista de casos guardados (desde Supabase si está conectado, o local)
-      const storedCasesList = await fetchAllCasesFromDatabase();
+      const storedCasesList = await fetchAllCasesFromDatabase(userRole === "firm" ? undefined : activeProfile);
       if (!cancelled) {
         setAllCases(storedCasesList);
       }
@@ -286,10 +312,16 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       ]);
 
       if (!cancelled) {
-        setAgenda(agendaRes.data && agendaRes.data.length > 0 ? agendaRes.data : (activeCase ? getStoredAgenda() : []));
-        setHistory(historyRes.data && historyRes.data.length > 0 ? historyRes.data : (activeCase ? getStoredHistory() : []));
-        setDocuments(docsRes.data && docsRes.data.length > 0 ? docsRes.data : (activeCase ? getStoredDocuments() : []));
-        setFinances(finRes.data && finRes.data.length > 0 ? finRes.data : getStoredFinances());
+        setAgenda(agendaRes.data && agendaRes.data.length > 0 ? agendaRes.data : (activeCase ? getStoredAgenda().filter((item) => item.case_id === activeCase.id) : []));
+        setHistory(historyRes.data && historyRes.data.length > 0 ? historyRes.data : (activeCase ? getStoredHistory().filter((item) => item.case_id === activeCase.id) : []));
+        setDocuments(docsRes.data && docsRes.data.length > 0 ? docsRes.data : (activeCase ? getStoredDocuments().filter((item) => item.case_id === activeCase.id) : []));
+        setFinances(finRes.data && finRes.data.length > 0
+          ? finRes.data
+          : userRole === "firm"
+            ? getStoredFinances()
+            : activeCase
+              ? getStoredFinances().filter((item) => item.case_id === activeCase.id || item.client_id === activeProfile.id)
+              : []);
         setLoadingData(false);
       }
     })();
@@ -305,14 +337,14 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   };
 
   const refreshCasesList = async () => {
-    const cases = await fetchAllCasesFromDatabase();
+    const cases = await fetchAllCasesFromDatabase(profile?.role === "firm" ? undefined : profile);
     setAllCases(cases);
   };
 
   const handleUpdateCase = async (updated: CaseRecord) => {
     saveStoredCase(updated);
     await syncCaseToDatabase(updated);
-    const updatedList = await fetchAllCasesFromDatabase();
+    const updatedList = await fetchAllCasesFromDatabase(profile?.role === "firm" ? undefined : profile);
     setAllCases(updatedList);
     setCaseRecord(updated);
   };
@@ -320,7 +352,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const handleSaveOrUpdateCase = async (savedCase: CaseRecord) => {
     saveStoredCase(savedCase);
     await syncCaseToDatabase(savedCase);
-    const updatedList = await fetchAllCasesFromDatabase();
+    const updatedList = await fetchAllCasesFromDatabase(profile?.role === "firm" ? undefined : profile);
     setAllCases(updatedList);
     setCaseRecord(savedCase);
     setIsCreateCaseModalOpen(false);
@@ -352,7 +384,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
   const handleDeleteCase = async (caseId: string) => {
     await deleteCaseFromDatabase(caseId);
-    const updatedList = await fetchAllCasesFromDatabase();
+    const updatedList = await fetchAllCasesFromDatabase(profile?.role === "firm" ? undefined : profile);
     setAllCases(updatedList);
     setCaseRecord(updatedList.length > 0 ? updatedList[0] : null);
   };
@@ -360,11 +392,13 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const handleUpdateAgenda = (updated: AgendaItem[]) => {
     setAgenda(updated);
     saveStoredAgenda(updated);
+    if (caseRecord) syncListToSupabase("agenda_items", caseRecord.id, updated).catch((error) => console.error("No se pudo sincronizar el calendario:", error));
   };
 
   const handleUpdateHistory = (updated: HistoryItem[]) => {
     setHistory(updated);
     saveStoredHistory(updated);
+    if (caseRecord) syncListToSupabase("history_items", caseRecord.id, updated).catch((error) => console.error("No se pudo sincronizar el historial:", error));
   };
 
   // Selector de archivos del equipo del usuario
@@ -397,12 +431,17 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
       alert("Ingrese el título o denominación del documento.");
       return;
     }
+    if (!docDataUrl) {
+      alert("Selecciona el archivo que deseas incorporar al expediente.");
+      return;
+    }
 
     setUploadingDoc(true);
     try {
-      const finalName = docTitle.trim().endsWith(".pdf") || docTitle.trim().endsWith(".docx")
+      const fileExtension = docFileName.match(/\.[^/.]+$/)?.[0] || ".pdf";
+      const finalName = /\.[a-z0-9]{2,5}$/i.test(docTitle.trim())
         ? docTitle.trim()
-        : `${docTitle.trim()}.pdf`;
+        : `${docTitle.trim()}${fileExtension}`;
 
       const newDoc: DocumentItem = {
         id: generateUuid(),
@@ -439,14 +478,18 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   // Eliminar documento del expediente
   const handleDeleteDocument = async (docId: string, docName: string) => {
     if (!window.confirm(`¿Está seguro de eliminar el documento "${docName}" del expediente?`)) return;
-    await deleteDocumentFromDatabase(docId);
-    const updatedDocs = documents.filter((d) => d.id !== docId);
-    setDocuments(updatedDocs);
-    if (caseRecord) {
-      handleUpdateCase({
-        ...caseRecord,
-        documents_count: updatedDocs.length,
-      });
+    try {
+      await deleteDocumentFromDatabase(docId);
+      const updatedDocs = documents.filter((d) => d.id !== docId);
+      setDocuments(updatedDocs);
+      if (caseRecord) {
+        handleUpdateCase({
+          ...caseRecord,
+          documents_count: updatedDocs.length,
+        });
+      }
+    } catch (error: any) {
+      alert("No se pudo eliminar el documento de Supabase: " + (error?.message || String(error)));
     }
   };
 
@@ -577,11 +620,10 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     window.print();
   };
 
-  // Login de Usuario Real con blindaje y auto-resolución para Super Admin
+  // Inicio de sesión con correo y contraseña autorizados
   async function handleLogin(event?: FormEvent) {
     if (event) event.preventDefault();
     setAuthError(null);
-    setAuthSuccess(null);
     setSubmitting(true);
 
     try {
@@ -598,54 +640,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     }
   }
 
-  // Registro directo de cliente sin necesidad de validación ni verificación de correo
-  async function handleRegister(event?: FormEvent) {
-    if (event) event.preventDefault();
-    setAuthError(null);
-    setAuthSuccess(null);
-    setSubmitting(true);
-
-    try {
-      const res = await registerDirectClientAccount(email, password, registerName);
-      if (res.success && res.session) {
-        setSession(res.session);
-      } else {
-        setAuthError(res.error || "No se pudo registrar la cuenta. Verifique los datos.");
-      }
-    } catch (err: any) {
-      setAuthError(err.message || "Error al crear la cuenta.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  // Acceso directo con 1 clic para cualquiera de los 3 Administradores
-  async function handleQuickLogin(targetEmail: string, targetName: string) {
-    setEmail(targetEmail);
-    setPassword("Admin2026*");
-    setAuthError(null);
-    setAuthSuccess(`Iniciando sesión como ${targetName}…`);
-    setSubmitting(true);
-
-    try {
-      const res = await loginWithCredentials(targetEmail, "Admin2026*");
-      if (res.success && res.session) {
-        setSession(res.session);
-      } else {
-        setAuthError(res.error || "No se pudo iniciar sesión.");
-      }
-    } catch (err: any) {
-      setAuthError(err.message || "Error al iniciar sesión.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  // Compatibilidad con invocación directa de David Pérez
-  async function handleQuickSuperAdminLogin() {
-    await handleQuickLogin(SUPER_ADMIN_EMAIL, "Super Administrador (David Pérez)");
-  }
-
   async function handleLogout() {
     await supabase.auth.signOut();
     setSession(null);
@@ -660,6 +654,27 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     }
   };
 
+  // Cambiar de expediente también vuelve a cargar los documentos asociados a su case_id.
+  const handleSelectCase = async (selected: CaseRecord) => {
+    setCaseRecord(selected);
+    setLoadingData(true);
+    try {
+      const [agendaRes, historyRes, caseDocuments] = await Promise.all([
+        supabase.from("agenda_items").select("*").eq("case_id", selected.id).order("event_date", { ascending: true }),
+        supabase.from("history_items").select("*").eq("case_id", selected.id).order("event_date", { ascending: false }),
+        fetchDocumentsForCaseFromDatabase(selected.id),
+      ]);
+      setAgenda(agendaRes.data ?? getStoredAgenda().filter((item) => item.case_id === selected.id));
+      setHistory(historyRes.data ?? getStoredHistory().filter((item) => item.case_id === selected.id));
+      setDocuments(caseDocuments.filter((doc) => doc.case_id === selected.id));
+    } catch (error) {
+      console.error("No se pudieron cargar los datos del expediente seleccionado", error);
+      setDocuments(getStoredDocuments().filter((doc) => doc.case_id === selected.id));
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
   if (loadingAuth) {
     return <div className="portal-loading">Verificando sesión segura…</div>;
   }
@@ -667,6 +682,9 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   // VISTA AUTENTICADA (DASHBOARD)
   if (session && profile) {
     const isFirm = profile.role === "firm";
+    const upcomingAgenda = [...agenda]
+      .filter((item) => item.event_date >= new Date().toISOString().slice(0, 10))
+      .sort((a, b) => `${a.event_date} ${a.event_time || ""}`.localeCompare(`${b.event_date} ${b.event_time || ""}`))[0];
 
     return (
       <main className="portal-dashboard">
@@ -721,6 +739,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               {/* Pestañas de Administración para Abogados */}
               {isFirm && (
                 <>
+                  <div className="portal-menu-label">Administración</div>
                   <button
                     type="button"
                     className={activeSection === "admin" && adminSubTab === "casos" ? "active" : ""}
@@ -766,6 +785,8 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               >
                 <span>Resumen</span>
               </button>
+
+              <div className="portal-menu-label">Expediente y seguimiento</div>
 
               <button
                 type="button"
@@ -818,6 +839,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 <span>Historial</span>
               </button>
 
+              <div className="portal-menu-label">Herramientas</div>
               {/* Pestaña: Economía & Honorarios */}
               <button
                 type="button"
@@ -849,7 +871,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
             {/* Panel de control rápido para abogados */}
             {isFirm ? (
-              <div
+              <div className="portal-quick-panel"
                 style={{
                   padding: "16px",
                   background: "var(--ink-panel)",
@@ -998,7 +1020,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 initialTab={adminSubTab}
                 allCases={allCases}
                 onSelectCase={(selected) => {
-                  setCaseRecord(selected);
+                  void handleSelectCase(selected);
                   setActiveSection("resumen");
                 }}
                 onCreateNewCase={(prefillId, prefillEmail, prefillName) => {
@@ -1043,7 +1065,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 cases={allCases}
                 currentProfile={profile}
                 onSelectCase={(selected) => {
-                  setCaseRecord(selected);
+                  void handleSelectCase(selected);
                   setActiveSection("resumen");
                 }}
                 onEditCase={(selected) => {
@@ -1069,7 +1091,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
             {activeSection === "proceso" && (
               <SupabaseCasesTable
                 onSelectCase={(selected) => {
-                  setCaseRecord(selected);
+                  void handleSelectCase(selected);
                   setActiveSection("resumen");
                 }}
                 onNavigateToSection={(sec) => setActiveSection(sec)}
@@ -1158,7 +1180,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                         value={caseRecord.id}
                         onChange={(e) => {
                           const selected = allCases.find((c) => c.id === e.target.value);
-                          if (selected) setCaseRecord(selected);
+                          if (selected) void handleSelectCase(selected);
                         }}
                         style={{
                           background: "var(--parchment-deep)",
@@ -1196,7 +1218,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                     </div>
 
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                      <button
+                      {isFirm && <button
                         type="button"
                         onClick={() => {
                           setEditingCase(caseRecord);
@@ -1214,7 +1236,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                         }}
                       >
                         ✏️ Editar Caso & Adelantos
-                      </button>
+                      </button>}
 
                       <button
                         type="button"
@@ -1345,6 +1367,28 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 {/* TAB: RESUMEN */}
                 {activeSection === "resumen" && (
                   <>
+                    <div className="portal-stats" aria-label="Resumen del expediente">
+                      <button type="button" className="portal-stat-card" onClick={() => setActiveSection("proceso")}>
+                        <span>Estado del caso</span>
+                        <strong className="portal-stat-status">{caseRecord.status || "En seguimiento"}</strong>
+                        <small>Ver expediente</small>
+                      </button>
+                      <button type="button" className="portal-stat-card" onClick={() => setActiveSection("proceso")}>
+                        <span>Avance procesal</span>
+                        <strong>{Number(caseRecord.progress) || 0}%</strong>
+                        <small>Fase: {caseRecord.current_phase || "En curso"}</small>
+                      </button>
+                      <button type="button" className="portal-stat-card" onClick={() => setActiveSection("documentos")}>
+                        <span>Documentos</span>
+                        <strong>{documents.filter((doc) => doc.case_id === caseRecord.id).length}</strong>
+                        <small>Consultar expediente digital</small>
+                      </button>
+                      <button type="button" className="portal-stat-card" onClick={() => setActiveSection("agenda")}>
+                        <span>Próxima diligencia</span>
+                        <strong className="portal-stat-date">{upcomingAgenda ? formatLong(upcomingAgenda.event_date) : "Sin programar"}</strong>
+                        <small>{upcomingAgenda?.title || "Consultar calendario"}</small>
+                      </button>
+                    </div>
                     <div className="portal-main-grid">
                     {/* Próximas Citas y Audiencias */}
                     <article className="portal-panel">
@@ -1454,10 +1498,10 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                           Expediente Digital Oficial &amp; Adjuntador
                         </p>
                         <h3 style={{ margin: "4px 0 0", color: "var(--text-bright)", fontSize: "1.15rem" }}>
-                          Documentos &amp; Pruebas del Caso ({documents.filter((d) => !d.case_id || d.case_id === caseRecord.id).length})
+                          Documentos &amp; Pruebas del Caso ({documents.filter((d) => d.case_id === caseRecord.id).length})
                         </h3>
                       </div>
-                      <button
+                      {isFirm && <button
                         type="button"
                         onClick={() => setIsAddDocModalOpen(true)}
                         className="btn primary"
@@ -1472,14 +1516,14 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                       >
                         <Upload size={14} />
                         <span>+ Adjuntar Archivo a la Vista</span>
-                      </button>
+                      </button>}
                     </div>
 
                     <p style={{ margin: "0 0 14px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
                       Archivos oficiales almacenados en Supabase Storage (autos, providencias, poderes, demandas y constancias de pago).
                     </p>
 
-                    {documents.filter((d) => !d.case_id || d.case_id === caseRecord.id).length === 0 ? (
+                    {documents.filter((d) => d.case_id === caseRecord.id).length === 0 ? (
                       <div
                         style={{
                           textAlign: "center",
@@ -1492,19 +1536,19 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                         <p style={{ margin: "0 0 10px", fontSize: "0.82rem", color: "var(--text-muted)" }}>
                           Aún no hay archivos adjuntos en este proceso.
                         </p>
-                        <button
+                        {isFirm && <button
                           type="button"
                           onClick={() => setIsAddDocModalOpen(true)}
                           className="btn primary"
                           style={{ padding: "6px 14px", fontSize: "0.78rem" }}
                         >
                           + Adjuntar Primer Archivo
-                        </button>
+                        </button>}
                       </div>
                     ) : (
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "10px" }}>
                         {documents
-                          .filter((d) => !d.case_id || d.case_id === caseRecord.id)
+                          .filter((d) => d.case_id === caseRecord.id)
                           .map((doc) => (
                             <div
                               key={doc.id}
@@ -1610,7 +1654,13 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                       )}
                     </div>
 
-                    <div className="agenda-list" style={{ marginTop: "16px" }}>
+                    {agenda.length === 0 ? (
+                      <div className="empty-state" style={{ marginTop: "16px", padding: "28px 18px", textAlign: "center" }}>
+                        <p style={{ margin: 0, color: "var(--text-muted)" }}>
+                          {isFirm ? "Aún no hay diligencias. Usa “Programar Diligencia” para agregar una." : "El despacho aún no ha registrado diligencias para este caso."}
+                        </p>
+                      </div>
+                    ) : <div className="agenda-list" style={{ marginTop: "16px" }}>
                       {agenda.map((item) => {
                         const { day, month } = formatDay(item.event_date);
                         return (
@@ -1622,13 +1672,15 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                             <div className="agenda-info">
                               <h3>{item.title}</h3>
                               <p>{item.detail}</p>
+                              {item.event_time && <small>🕒 {item.event_time} · </small>}
                               {item.location && <small>📍 {item.location}</small>}
+                              {item.virtual_link && <a href={item.virtual_link} target="_blank" rel="noreferrer" style={{ display: "block", marginTop: "6px" }}>Unirse a diligencia virtual</a>}
                               {item.type && <span style={{ marginLeft: "10px", fontSize: "0.72rem", color: "var(--brass)" }}>[{item.type}]</span>}
                             </div>
                           </div>
                         );
                       })}
-                    </div>
+                    </div>}
                   </article>
                 )}
 
@@ -1641,7 +1693,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                         <h2>Documentos del Caso ({documents.length})</h2>
                       </div>
                       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        <button
+                        {isFirm && <button
                           type="button"
                           onClick={() => setIsAddDocModalOpen(true)}
                           style={{
@@ -1660,7 +1712,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                         >
                           <FileText size={14} />
                           <span>+ Subir / Agregar Documento</span>
-                        </button>
+                        </button>}
                         {isFirm && (
                           <button
                             type="button"
@@ -1698,9 +1750,9 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                           No hay documentos incorporados a este expediente aún
                         </h4>
                         <p style={{ margin: "0 auto 16px", maxWidth: "440px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                          Puede subir demandas, autos interlocutorios, pruebas periciales, poderes o memoriales en formato PDF, Word o imagen.
+                          {isFirm ? "Incorpora demandas, autos, pruebas, poderes o memoriales en formato PDF, Word o imagen." : "El despacho aún no ha cargado documentos para este expediente."}
                         </p>
-                        <button
+                        {isFirm && <button
                           type="button"
                           onClick={() => setIsAddDocModalOpen(true)}
                           style={{
@@ -1715,11 +1767,11 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                           }}
                         >
                           + Incorporar Primer Documento
-                        </button>
+                        </button>}
                       </div>
                     ) : (
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))", gap: "14px", marginTop: "16px" }}>
-                        {documents.map((doc) => (
+                        {documents.filter((doc) => doc.case_id === caseRecord.id).map((doc) => (
                           <div
                             key={doc.id}
                             style={{
@@ -1868,7 +1920,11 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
                       )}
                     </div>
 
-                    <div className="timeline" style={{ marginTop: "18px" }}>
+                    {history.length === 0 ? (
+                      <div style={{ marginTop: "18px", padding: "28px 18px", textAlign: "center", color: "var(--text-muted)" }}>
+                        {isFirm ? "Aún no hay actuaciones registradas. Usa “Agregar actuación” para crear la primera." : "El despacho aún no ha registrado actuaciones para este caso."}
+                      </div>
+                    ) : <div className="timeline" style={{ marginTop: "18px" }}>
                       {history.map((item) => (
                         <div className="timeline-item" key={item.id}>
                           <span className="timeline-dot" />
@@ -1880,7 +1936,7 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
                           </div>
                         </div>
                       ))}
-                    </div>
+                    </div>}
                   </article>
                 )}
               </>
@@ -1905,6 +1961,29 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
           prefilledClientEmail={prefillClientEmail}
           prefilledClientName={prefillClientName}
         />
+
+        {caseRecord && isFirm && profile && (
+          <CaseEditorDrawer
+            isOpen={isEditorOpen}
+            onClose={() => setIsEditorOpen(false)}
+            caseRecord={caseRecord}
+            onUpdateCase={handleUpdateCase}
+            agenda={agenda}
+            onUpdateAgenda={handleUpdateAgenda}
+            history={history}
+            onUpdateHistory={handleUpdateHistory}
+            documents={documents}
+            onUpdateDocuments={handleUpdateDocuments}
+            profile={profile}
+            onUpdateProfile={handleUpdateProfile}
+            onResetDefaults={handleResetDefaults}
+            onLoadTemplate={handleLoadTemplate}
+            onEnterPresentationMode={() => {
+              setIsEditorOpen(false);
+              setIsPresentationMode(true);
+            }}
+          />
+        )}
 
         {/* Modal de Documentos */}
         {caseRecord && (
@@ -2121,24 +2200,25 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
   // =========================================================================
   return (
     <main className="client-portal login-view">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: "480px", marginBottom: "16px" }}>
+      <div className="login-toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", maxWidth: "480px", marginBottom: "16px" }}>
         <button type="button" onClick={handleBack} className="portal-back login-back" style={{ margin: 0 }}>
           ← Volver al sitio web principal
         </button>
         <ThemeToggle />
       </div>
 
-      <section className="portal-card login-card" style={{ maxWidth: "480px", padding: "28px 24px" }}>
+      <section className="portal-card login-card" style={{ maxWidth: "480px", padding: "28px 30px" }}>
         <img
-          src={emblemLogo}
-          alt="Jiménez &amp; Ariza Asociados"
+          src={companyLogo}
+          alt="Jiménez y Ariza Asociados"
           className="portal-logo"
           style={{
-            maxWidth: "140px",
+            maxWidth: "270px",
             height: "auto",
-            margin: "0 auto 16px",
+            margin: "0 auto 10px",
             display: "block",
-            filter: "drop-shadow(0 4px 14px rgba(212, 159, 57, 0.28))",
+            mixBlendMode: "lighten",
+            filter: "drop-shadow(0 8px 18px rgba(212, 159, 57, 0.12))",
           }}
         />
 
@@ -2147,341 +2227,51 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
           Portal de Clientes &amp; Despacho
         </h1>
         <p className="portal-text" style={{ fontSize: "0.82rem", marginBottom: "18px", textAlign: "center", color: "var(--text-muted)" }}>
-          {authMode === "login"
-            ? "Consulte y gestione sus expedientes con sus credenciales autorizadas."
-            : "Cree su cuenta directamente con correo y contraseña. Acceso instantáneo sin verificación previa."}
+          Ingrese con el usuario y la contraseña asignados por la firma.
         </p>
 
-        {/* Selector de modo: Iniciar Sesión vs Crear Cuenta */}
-        <div
-          style={{
-            display: "flex",
-            background: "rgba(255, 255, 255, 0.04)",
-            padding: "4px",
-            borderRadius: "6px",
-            border: "1px solid var(--line)",
-            marginBottom: "18px",
-            gap: "4px",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setAuthMode("login");
-              setAuthError(null);
-            }}
-            style={{
-              flex: 1,
-              padding: "8px 12px",
-              borderRadius: "4px",
-              border: "none",
-              fontSize: "0.82rem",
-              fontWeight: authMode === "login" ? 700 : 500,
-              background: authMode === "login" ? "var(--brass)" : "transparent",
-              color: authMode === "login" ? "var(--ink)" : "var(--text-muted)",
-              cursor: "pointer",
-              transition: "all 0.2s ease",
-            }}
-          >
-            Iniciar Sesión
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setAuthMode("register");
-              setAuthError(null);
-            }}
-            style={{
-              flex: 1,
-              padding: "8px 12px",
-              borderRadius: "4px",
-              border: "none",
-              fontSize: "0.82rem",
-              fontWeight: authMode === "register" ? 700 : 500,
-              background: authMode === "register" ? "var(--brass)" : "transparent",
-              color: authMode === "register" ? "var(--ink)" : "var(--text-muted)",
-              cursor: "pointer",
-              transition: "all 0.2s ease",
-            }}
-          >
-            Crear Cuenta (Cliente)
-          </button>
-        </div>
-
-        {authSuccess && <p className="auth-success-msg">{authSuccess}</p>}
         {authError && <p className="portal-form-error" style={{ marginBottom: "14px" }}>{authError}</p>}
 
-        {authMode === "login" ? (
-          <>
-            {/* Panel de Administradores de la Firma */}
-            <div
-              style={{
-                background: "rgba(217, 181, 106, 0.06)",
-                border: "1px solid rgba(217, 181, 106, 0.35)",
-                borderRadius: "6px",
-                padding: "12px 14px",
-                marginBottom: "18px",
-                textAlign: "left",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <span style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--brass)", fontWeight: 700 }}>
-                  Acceso Rápido Socios Titulares
-                </span>
-                <span style={{ fontSize: "0.68rem", background: "var(--brass)", color: "var(--ink)", padding: "2px 7px", borderRadius: "3px", fontWeight: 700 }}>
-                  Clave: Admin2026*
-                </span>
-              </div>
+        <form className="portal-form" onSubmit={handleLogin}>
+          <label>
+            Usuario
+            <input
+              type="text"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="marlon.jimenez"
+              required
+              autoFocus
+              autoComplete="username"
+            />
+          </label>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                {/* 1. David Pérez */}
-                <div
-                  style={{
-                    background: "var(--parchment-deep)",
-                    border: "1px solid var(--line)",
-                    padding: "7px 10px",
-                    borderRadius: "4px",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <strong style={{ fontSize: "0.8rem", color: "var(--text-bright)", display: "block" }}>David Pérez</strong>
-                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{SUPER_ADMIN_EMAIL}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin(SUPER_ADMIN_EMAIL, "David Pérez")}
-                    disabled={submitting}
-                    style={{
-                      background: "var(--brass)",
-                      color: "var(--ink)",
-                      border: "none",
-                      borderRadius: "3px",
-                      padding: "4px 8px",
-                      fontSize: "0.72rem",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Entrar
-                  </button>
-                </div>
-
-                {/* 2. Dr. Marlon Jiménez */}
-                <div
-                  style={{
-                    background: "var(--parchment-deep)",
-                    border: "1px solid var(--line)",
-                    padding: "7px 10px",
-                    borderRadius: "4px",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <strong style={{ fontSize: "0.8rem", color: "var(--text-bright)", display: "block" }}>Dr. Marlon Jiménez</strong>
-                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{ADMIN_1_EMAIL}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin(ADMIN_1_EMAIL, "Dr. Marlon Jiménez")}
-                    disabled={submitting}
-                    style={{
-                      background: "#38bdf8",
-                      color: "#0f172a",
-                      border: "none",
-                      borderRadius: "3px",
-                      padding: "4px 8px",
-                      fontSize: "0.72rem",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Entrar
-                  </button>
-                </div>
-
-                {/* 3. Dr. Sebastián Ariza */}
-                <div
-                  style={{
-                    background: "var(--parchment-deep)",
-                    border: "1px solid var(--line)",
-                    padding: "7px 10px",
-                    borderRadius: "4px",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <strong style={{ fontSize: "0.8rem", color: "var(--text-bright)", display: "block" }}>Dr. Felipe Sebastián Ariza</strong>
-                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{ADMIN_2_EMAIL}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin(ADMIN_2_EMAIL, "Dr. Sebastián Ariza")}
-                    disabled={submitting}
-                    style={{
-                      background: "#4ade80",
-                      color: "#0f172a",
-                      border: "none",
-                      borderRadius: "3px",
-                      padding: "4px 8px",
-                      fontSize: "0.72rem",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Entrar
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* FORMULARIO MANUAL DE INICIO DE SESIÓN */}
-            <form className="portal-form" onSubmit={handleLogin}>
-              <label>
-                Correo electrónico
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="su-correo@ejemplo.com"
-                  required
-                  autoFocus
-                />
-              </label>
-
-              <label>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span>Contraseña</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      color: "var(--brass-light)",
-                      fontSize: "0.74rem",
-                      cursor: "pointer",
-                      padding: "0 4px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
-                  >
-                    {showPassword ? "🙈 Ocultar" : "👁️ Ver contraseña"}
-                  </button>
-                </div>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    style={{ paddingRight: "40px", width: "100%" }}
-                  />
-                </div>
-              </label>
-
-              <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "12px", width: "100%", padding: "12px", fontWeight: 700 }}>
-                {submitting ? "Iniciando sesión…" : "Ingresar a mi Caso"}
+          <label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Contraseña</span>
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{ background: "transparent", border: "none", color: "var(--brass-light)", fontSize: "0.74rem", cursor: "pointer", padding: "0 4px" }}
+              >
+                {showPassword ? "🙈 Ocultar" : "👁️ Ver contraseña"}
               </button>
-            </form>
-          </>
-        ) : (
-          /* FORMULARIO DE REGISTRO DIRECTO (SIN VALIDACIÓN POR CORREO) */
-          <form className="portal-form" onSubmit={handleRegister}>
-            <div
-              style={{
-                background: "rgba(56, 189, 248, 0.08)",
-                border: "1px solid rgba(56, 189, 248, 0.3)",
-                borderRadius: "6px",
-                padding: "10px 12px",
-                marginBottom: "14px",
-                fontSize: "0.76rem",
-                color: "var(--text-muted)",
-                lineHeight: 1.45,
-              }}
-            >
-              <strong style={{ color: "#38bdf8", display: "block", marginBottom: "2px" }}>
-                Acceso directo e instantáneo
-              </strong>
-              Cree su cuenta con su correo y contraseña. No se requieren códigos de validación ni esperar confirmación por correo; entrará directamente a ver su expediente.
             </div>
+            <input
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Su contraseña"
+              required
+              autoComplete="current-password"
+              style={{ width: "100%" }}
+            />
+          </label>
 
-            <label>
-              Nombre completo (Opcional)
-              <input
-                type="text"
-                value={registerName}
-                onChange={(e) => setRegisterName(e.target.value)}
-                placeholder="Ej: Pedro Gómez"
-              />
-            </label>
-
-            <label>
-              Correo electrónico
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="cliente@ejemplo.com"
-                required
-                autoFocus
-              />
-            </label>
-
-            <label>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>Contraseña</span>
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--brass-light)",
-                    fontSize: "0.74rem",
-                    cursor: "pointer",
-                    padding: "0 4px",
-                  }}
-                >
-                  {showPassword ? "🙈 Ocultar" : "👁️ Ver"}
-                </button>
-              </div>
-              <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Defina su contraseña"
-                required
-                minLength={4}
-              />
-            </label>
-
-            <button
-              className="btn primary"
-              type="submit"
-              disabled={submitting}
-              style={{
-                marginTop: "14px",
-                width: "100%",
-                padding: "12px",
-                fontWeight: 700,
-                background: "var(--brass)",
-                color: "var(--ink)",
-              }}
-            >
-              {submitting ? "Creando cuenta e ingresando…" : "Crear Cuenta e Ingresar"}
-            </button>
-          </form>
-        )}
-
+          <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "12px", width: "100%", padding: "12px", fontWeight: 700 }}>
+            {submitting ? "Verificando credenciales…" : "Iniciar sesión"}
+          </button>
+        </form>
         <div style={{ marginTop: "24px", paddingTop: "14px", borderTop: "1px solid var(--line)", textAlign: "center" }}>
           <p style={{ margin: 0, fontSize: "0.74rem", color: "var(--text-muted)" }}>
             J&amp;A Legal · Jiménez &amp; Ariza Asociados © {new Date().getFullYear()}

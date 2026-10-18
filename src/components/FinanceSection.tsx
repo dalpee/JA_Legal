@@ -192,10 +192,7 @@ export function FinanceSection({
       "Forma de cobro",
       "Abono recibido",
       "Saldo pendiente",
-      "% Marlon",
-      "% Sebastián",
-      "Marlon recibe",
-      "Sebastián recibe",
+      ...(isFirm ? ["% Marlon", "% Sebastián", "Marlon recibe", "Sebastián recibe"] : []),
       "Estado de pago",
       "Fecha último abono",
       "Observaciones",
@@ -208,10 +205,12 @@ export function FinanceSection({
       `"${(f.forma_cobro || f.payment_method || "Transferencia").replace(/"/g, '""')}"`,
       f.abono_recibido ?? (f.status === "completado" ? f.amount : 0),
       f.saldo_pendiente ?? Math.max(0, (f.total_pactado ?? f.amount) - (f.abono_recibido ?? 0)),
-      `${f.pct_marlon ?? 50}%`,
-      `${f.pct_sebastian ?? 50}%`,
-      f.marlon_recibe ?? ((f.abono_recibido ?? 0) * (f.pct_marlon ?? 50)) / 100,
-      f.sebastian_recibe ?? ((f.abono_recibido ?? 0) * (f.pct_sebastian ?? 50)) / 100,
+      ...(isFirm ? [
+        `${f.pct_marlon ?? 50}%`,
+        `${f.pct_sebastian ?? 50}%`,
+        f.marlon_recibe ?? ((f.abono_recibido ?? 0) * (f.pct_marlon ?? 50)) / 100,
+        f.sebastian_recibe ?? ((f.abono_recibido ?? 0) * (f.pct_sebastian ?? 50)) / 100,
+      ] : []),
       f.payment_status || (f.status === "completado" ? "Pagado" : "Pendiente"),
       f.fecha_ultimo_abono || f.date || "",
       `"${(f.notes || "").replace(/"/g, '""')}"`,
@@ -307,10 +306,10 @@ export function FinanceSection({
             Módulo Financiero Oficial J&amp;A Legal
           </span>
           <h2 style={{ margin: "4px 0 6px", color: "var(--text-bright)", fontSize: "1.45rem" }}>
-            Control de Honorarios, Cobros &amp; Reparto a Socios
+            {isFirm ? "Control de Honorarios, Cobros & Reparto a Socios" : "Resumen de pagos del caso"}
           </h2>
           <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.85rem", maxWidth: "620px" }}>
-            Matriz integral sincronizada con Supabase basada en el modelo contable de la firma: pactado, abonos, saldos y reparto entre Dr. Marlon Jiménez y Dr. Felipe Sebastián Ariza.
+            {isFirm ? "Matriz integral sincronizada con Supabase: pactado, abonos, saldos y reparto entre socios." : "Consulta los honorarios, abonos y saldos de tus casos."}
           </p>
         </div>
 
@@ -546,18 +545,12 @@ export function FinanceSection({
                     <th style={{ padding: "12px 14px", borderRight: "1px solid rgba(255,255,255,0.15)", background: "#1e3a5f" }}>
                       Saldo pendiente
                     </th>
-                    <th style={{ padding: "12px 10px", borderRight: "1px solid rgba(255,255,255,0.15)" }}>
-                      % Marlon
-                    </th>
-                    <th style={{ padding: "12px 10px", borderRight: "1px solid rgba(255,255,255,0.15)" }}>
-                      % Sebastián
-                    </th>
-                    <th style={{ padding: "12px 14px", borderRight: "1px solid rgba(255,255,255,0.15)" }}>
-                      Marlon recibe
-                    </th>
-                    <th style={{ padding: "12px 14px", borderRight: "1px solid rgba(255,255,255,0.15)" }}>
-                      Sebastián recibe
-                    </th>
+                    {isFirm && <>
+                      <th style={{ padding: "12px 10px", borderRight: "1px solid rgba(255,255,255,0.15)" }}>% Marlon</th>
+                      <th style={{ padding: "12px 10px", borderRight: "1px solid rgba(255,255,255,0.15)" }}>% Sebastián</th>
+                      <th style={{ padding: "12px 14px", borderRight: "1px solid rgba(255,255,255,0.15)" }}>Marlon recibe</th>
+                      <th style={{ padding: "12px 14px", borderRight: "1px solid rgba(255,255,255,0.15)" }}>Sebastián recibe</th>
+                    </>}
                     <th style={{ padding: "12px 12px", borderRight: "1px solid rgba(255,255,255,0.15)" }}>
                       Estado de pago
                     </th>
@@ -646,6 +639,7 @@ export function FinanceSection({
                             {formatCOP(saldoPend)}
                           </td>
 
+                          {isFirm && <>
                           {/* % Marlon */}
                           <td style={{ padding: "10px 10px", textAlign: "center", color: "#60a5fa", fontWeight: 600, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
                             {pMarlon}%
@@ -665,6 +659,7 @@ export function FinanceSection({
                           <td style={{ padding: "10px 14px", textAlign: "right", color: "#e9d5ff", fontWeight: 700, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
                             {formatCOP(sebasAmt)}
                           </td>
+                          </>}
 
                           {/* Estado de pago (Badges estilizados idénticos a los del Excel) */}
                           <td style={{ padding: "10px 12px", textAlign: "center", borderRight: "1px solid rgba(255,255,255,0.06)" }}>
@@ -770,14 +765,12 @@ export function FinanceSection({
                     <td style={{ padding: "12px 14px", textAlign: "right", color: "#facc15" }}>
                       {formatCOP(sumSaldoPendiente)}
                     </td>
-                    <td style={{ padding: "12px 10px", textAlign: "center" }}>—</td>
-                    <td style={{ padding: "12px 10px", textAlign: "center" }}>—</td>
-                    <td style={{ padding: "12px 14px", textAlign: "right", color: "#93c5fd" }}>
-                      {formatCOP(sumMarlon)}
-                    </td>
-                    <td style={{ padding: "12px 14px", textAlign: "right", color: "#e9d5ff" }}>
-                      {formatCOP(sumSebastian)}
-                    </td>
+                    {isFirm && <>
+                      <td style={{ padding: "12px 10px", textAlign: "center" }}>—</td>
+                      <td style={{ padding: "12px 10px", textAlign: "center" }}>—</td>
+                      <td style={{ padding: "12px 14px", textAlign: "right", color: "#93c5fd" }}>{formatCOP(sumMarlon)}</td>
+                      <td style={{ padding: "12px 14px", textAlign: "right", color: "#e9d5ff" }}>{formatCOP(sumSebastian)}</td>
+                    </>}
                     <td colSpan={isFirm ? 4 : 3} style={{ padding: "12px 14px", textAlign: "center", color: "var(--text-muted)", fontSize: "0.74rem" }}>
                       Sincronizado en tiempo real con Supabase
                     </td>
@@ -791,7 +784,7 @@ export function FinanceSection({
 
       {/* VISTA 2: SOPORTE DE GRÁFICAS DE LO FINANCIERO */}
       {activeTab === "graficas" && (
-        <FinancialCharts finances={filteredFinances} />
+        <FinancialCharts finances={filteredFinances} isFirm={isFirm} />
       )}
 
       {/* ======================================================== */}
@@ -979,7 +972,7 @@ export function FinanceSection({
                 </div>
               </div>
 
-              {/* Porcentajes entre Socios */}
+              {isFirm && <>{/* Porcentajes entre Socios */}
               <div
                 style={{
                   background: "rgba(15, 23, 42, 0.6)",
@@ -1043,7 +1036,7 @@ export function FinanceSection({
                     </small>
                   </div>
                 </div>
-              </div>
+              </div></>}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 <div>

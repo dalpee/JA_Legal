@@ -4,7 +4,7 @@ import { CaseRecord, CasePhase } from "../types/portal";
 interface CreateCaseModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaveCase: (newCase: CaseRecord) => void;
+  onSaveCase: (newCase: CaseRecord) => void | Promise<void>;
   existingCase?: CaseRecord | null;
   registeredUsers?: { id: string; email: string; full_name: string; role?: string; id_number?: string }[];
   prefilledClientId?: string;
@@ -20,14 +20,11 @@ export function CreateCaseModal({
   registeredUsers = [],
   prefilledClientId = "",
   prefilledClientEmail = "",
-  prefilledClientName = "",
 }: CreateCaseModalProps) {
   const [title, setTitle] = useState(existingCase?.title || "");
   const [radicado, setRadicado] = useState(existingCase?.filed_date || existingCase?.radicado || "");
   const [processType, setProcessType] = useState(existingCase?.process_type || "Proceso Civil Ordinario");
   const [clientId, setClientId] = useState(existingCase?.client_id || prefilledClientId || "");
-  const [clientEmail, setClientEmail] = useState(existingCase?.client_email || prefilledClientEmail || "");
-  const [clientName, setClientName] = useState(existingCase?.client_name || prefilledClientName || "");
   const [authority, setAuthority] = useState(existingCase?.authority || "Juzgado Civil Municipal de Bogotá D.C.");
   const [lawyer, setLawyer] = useState(existingCase?.lawyer || "Dr. Marlon Jiménez - Socio Director");
   const [progress, setProgress] = useState<number>(existingCase?.progress ?? 15);
@@ -43,8 +40,6 @@ export function CreateCaseModal({
       setRadicado(existingCase?.filed_date || existingCase?.radicado || "");
       setProcessType(existingCase?.process_type || "Proceso Civil Ordinario");
       setClientId(existingCase?.client_id || prefilledClientId || "");
-      setClientEmail(existingCase?.client_email || prefilledClientEmail || "");
-      setClientName(existingCase?.client_name || prefilledClientName || "");
       setAuthority(existingCase?.authority || "Juzgado Civil Municipal de Bogotá D.C.");
       setLawyer(existingCase?.lawyer || "Dr. Marlon Jiménez - Socio Director");
       setProgress(existingCase?.progress ?? 15);
@@ -54,23 +49,25 @@ export function CreateCaseModal({
       setCounterparty(existingCase?.counterparty || "");
       setObservations(existingCase?.observations || "");
     }
-  }, [isOpen, existingCase, prefilledClientId, prefilledClientEmail, prefilledClientName]);
+  }, [isOpen, existingCase, prefilledClientId]);
 
   if (!isOpen) return null;
 
+  const availableClients = registeredUsers.filter((u) => u.role !== "firm" && Boolean(u.email?.trim()));
+  const assignedEmail = (prefilledClientEmail || existingCase?.client_email || "").trim().toLowerCase();
+  const selectedClient = availableClients.find((u) => u.id === clientId) || availableClients.find((u) => u.email.trim().toLowerCase() === assignedEmail);
+
   const handleSelectPredefinedUser = (userId: string) => {
-    const user = registeredUsers.find((u) => u.id === userId);
+    const user = availableClients.find((u) => u.id === userId);
     if (user) {
       setClientId(user.id);
-      setClientEmail(user.email);
-      setClientName(user.full_name);
     }
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || (!clientEmail.trim() && !clientId.trim())) {
-      alert("Por favor ingrese el título del proceso y asigne el cliente o su ID de usuario.");
+    if (!title.trim() || !selectedClient) {
+      alert("Primero cree la cuenta del cliente y selecciónela para vincular el caso.");
       return;
     }
 
@@ -103,9 +100,9 @@ export function CreateCaseModal({
 
     const updatedCase: CaseRecord = {
       id: existingCase?.id || `case_${Date.now()}`,
-      client_id: clientId.trim() || existingCase?.client_id || `usr_cli_${Date.now()}`,
-      client_email: clientEmail.trim().toLowerCase(),
-      client_name: clientName.trim() || clientEmail.split("@")[0],
+      client_id: selectedClient.id,
+      client_email: selectedClient.email.trim().toLowerCase(),
+      client_name: selectedClient.full_name.trim() || selectedClient.email.split("@")[0],
       title: title.trim(),
       radicado: radicado.trim(),
       filed_date: radicado.trim(),
@@ -126,8 +123,12 @@ export function CreateCaseModal({
       phases: defaultPhases,
     };
 
-    onSaveCase(updatedCase);
-    onClose();
+    try {
+      await onSaveCase(updatedCase);
+      onClose();
+    } catch (error: any) {
+      alert("No se pudo guardar el caso: " + (error?.message || String(error)));
+    }
   };
 
   return (
@@ -216,79 +217,38 @@ export function CreateCaseModal({
             </div>
           </div>
 
-          {/* ASIGNACIÓN DE CLIENTE Y VINCULACIÓN POR ID (SOLICITADO POR EL USUARIO) */}
+          {/* Asignación simple de una cuenta creada por la firma */}
           <div style={{ background: "rgba(217, 181, 106, 0.08)", border: "1px solid var(--brass)", padding: "16px", borderRadius: "6px" }}>
-            <span style={{ fontSize: "0.75rem", color: "var(--brass-light)", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: "8px" }}>
-              👤 Asignación de Cliente & ID de Base de Datos (Supabase)
-            </span>
-
-            {/* Selector rápido si hay usuarios registrados */}
-            {registeredUsers.length > 0 && (
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ fontSize: "0.74rem", color: "var(--text-bright)", fontWeight: 600, display: "block", marginBottom: "4px" }}>
-                  Seleccionar Cliente Registrado (Autocompletar ID, Nombre y Correo):
-                </label>
+            <label htmlFor="case-client" style={{ fontSize: "0.75rem", color: "var(--brass-light)", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: "8px" }}>
+              Cliente
+            </label>
+            {availableClients.length === 0 ? (
+              <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", margin: 0 }}>
+                Primero cree la cuenta del cliente en Usuarios.
+              </p>
+            ) : (
+              <>
                 <select
+                  id="case-client"
+                  required
+                  value={selectedClient?.id || ""}
                   onChange={(e) => handleSelectPredefinedUser(e.target.value)}
-                  style={{ width: "100%", padding: "8px 12px", background: "var(--ink-soft)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.82rem" }}
-                  defaultValue=""
+                  style={{ width: "100%", padding: "9px 12px", background: "var(--ink-soft)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
                 >
-                  <option value="" disabled>-- Seleccione un cliente para vincular --</option>
-                  {registeredUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.full_name} ({u.email || "Sin email"}) — ID: {u.id}
+                  <option value="">-- Seleccione un cliente --</option>
+                  {availableClients.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.full_name} ({user.email})
                     </option>
                   ))}
                 </select>
-              </div>
+                {selectedClient && (
+                  <small style={{ display: "block", marginTop: "6px", color: "var(--text-muted)", fontSize: "0.72rem" }}>
+                    El caso se vinculará automáticamente a {selectedClient.email}.
+                  </small>
+                )}
+              </>
             )}
-
-            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "12px", marginBottom: "12px" }}>
-              <div>
-                <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
-                  Correo electrónico del Cliente * (con el que inicia sesión)
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={clientEmail}
-                  onChange={(e) => setClientEmail(e.target.value)}
-                  placeholder="ejemplo: cliente@correo.com"
-                  style={{ width: "100%", padding: "8px 12px", background: "var(--ink-soft)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
-                  Nombre Completo del Cliente Titular
-                </label>
-                <input
-                  type="text"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  placeholder="Ej: Carlos Alberto Gómez"
-                  style={{ width: "100%", padding: "8px 12px", background: "var(--ink-soft)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", fontSize: "0.85rem" }}
-                />
-              </div>
-            </div>
-
-            {/* Campo explícito de ID de Usuario (client_id / UUID) */}
-            <div>
-              <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
-                ID de Usuario del Cliente en Supabase (UUID en tabla <code>profiles.id</code>) *
-              </label>
-              <input
-                type="text"
-                required
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                placeholder="UUID de Supabase o ID del usuario (ej: usr_demo_client_01)"
-                style={{ width: "100%", padding: "8px 12px", background: "var(--ink-soft)", border: "1px solid var(--line)", color: "var(--brass-light)", borderRadius: "4px", fontSize: "0.82rem", fontFamily: "monospace" }}
-              />
-              <small style={{ color: "var(--text-muted)", fontSize: "0.68rem", marginTop: "4px", display: "block" }}>
-                🔗 Clave foránea en la base de datos: <code>cases.client_id references profiles.id</code>. Solo el usuario con este ID y correo podrá acceder a ver los adelantos de este caso.
-              </small>
-            </div>
           </div>
 
           {/* Rama y Despacho */}
@@ -452,3 +412,4 @@ export function CreateCaseModal({
     </div>
   );
 }
+

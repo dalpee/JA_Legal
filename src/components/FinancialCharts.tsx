@@ -3,6 +3,7 @@ import { FinancialRecord } from "../types/portal";
 
 interface FinancialChartsProps {
   finances: FinancialRecord[];
+  isFirm?: boolean;
 }
 
 function formatCOP(val: number) {
@@ -13,7 +14,7 @@ function formatCOP(val: number) {
   }).format(val);
 }
 
-export function FinancialCharts({ finances }: FinancialChartsProps) {
+export function FinancialCharts({ finances, isFirm = false }: FinancialChartsProps) {
   const [activeTab, setActiveTab] = useState<"general" | "socios" | "estados">("general");
 
   // Cálculos principales
@@ -115,7 +116,7 @@ export function FinancialCharts({ finances }: FinancialChartsProps) {
           </small>
         </div>
 
-        {/* Reparto Socios */}
+        {isFirm && <>{/* Reparto Socios */}
         <div
           style={{
             background: "linear-gradient(135deg, rgba(30, 58, 138, 0.35) 0%, rgba(15, 23, 42, 0.85) 100%)",
@@ -138,7 +139,7 @@ export function FinancialCharts({ finances }: FinancialChartsProps) {
               <strong style={{ color: "#c084fc", fontSize: "0.98rem" }}>{formatCOP(totalSebastian)}</strong>
             </div>
           </div>
-        </div>
+        </div></>}
       </div>
 
       {/* Selector de sub-vistas de gráficas */}
@@ -159,7 +160,7 @@ export function FinancialCharts({ finances }: FinancialChartsProps) {
         >
           📊 Comparativa Casos (Pactado vs Recaudado vs Saldo)
         </button>
-        <button
+        {isFirm && <button
           type="button"
           onClick={() => setActiveTab("socios")}
           style={{
@@ -174,7 +175,7 @@ export function FinancialCharts({ finances }: FinancialChartsProps) {
           }}
         >
           👥 Distribución de Honorarios Socios (% y $)
-        </button>
+        </button>}
         <button
           type="button"
           onClick={() => setActiveTab("estados")}
@@ -321,7 +322,7 @@ export function FinancialCharts({ finances }: FinancialChartsProps) {
       )}
 
       {/* CONTENIDO 2: Distribución de Socios */}
-      {activeTab === "socios" && (
+      {isFirm && activeTab === "socios" && (
         <div
           style={{
             display: "grid",

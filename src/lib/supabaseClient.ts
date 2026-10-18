@@ -8,14 +8,20 @@ export const SUPER_ADMIN_EMAIL = "eldavidprz@gmail.com";
 // Los 2 Administradores Socios de la firma autorizados
 export const ADMIN_1_EMAIL = "marlon.jimenez@jalegal.com.co";
 export const ADMIN_2_EMAIL = "sebastian.ariza@jalegal.com.co";
+// Algunas cuentas existentes del despacho en Supabase Auth usan estos correos personales.
+export const FIRM_ADMIN_EMAILS = [
+  SUPER_ADMIN_EMAIL,
+  ADMIN_1_EMAIL,
+  ADMIN_2_EMAIL,
+  "marlondavidjimenez22@gmail.com",
+  "abogadosebastianariza@gmail.com",
+  "contacto@jalegal.com.co",
+].map((value) => value.toLowerCase());
+// Alias interno requerido por Supabase Auth; el personal inicia sesión solo con el nombre antes de @.
+export const LOGIN_EMAIL_DOMAIN = "acceso.jalegal.com.co";
 
 // Lista exclusiva de administradores que pueden crear y gestionar cuentas en el sistema
-export const AUTHORIZED_CREATOR_EMAILS = [
-  SUPER_ADMIN_EMAIL.toLowerCase(),
-  ADMIN_1_EMAIL.toLowerCase(),
-  ADMIN_2_EMAIL.toLowerCase(),
-  "contacto@jalegal.com.co",
-];
+export const AUTHORIZED_CREATOR_EMAILS = FIRM_ADMIN_EMAILS;
 
 // Valida si un usuario tiene permisos estrictos para crear nuevas cuentas en el sistema
 // Regla: Únicamente el Super Admin (eldavidprz@gmail.com) y los 2 Administradores
@@ -40,6 +46,7 @@ const STORAGE_USERS_KEY = "ja_legal_registered_users";
 export type StoredUser = {
   id: string;
   email: string;
+  username?: string;
   password?: string;
   full_name: string;
   initials: string;
@@ -251,6 +258,31 @@ export function updateUserPassword(userIdOrEmail: string, newPassword: string): 
     console.warn("Error updating user password", e);
     return false;
   }
+}
+
+export async function updateUserProfile(
+  current: StoredUser,
+  changes: Pick<StoredUser, "username" | "full_name" | "initials" | "role" | "id_number" | "phone">
+): Promise<StoredUser> {
+  const updated: StoredUser = { ...current, ...changes };
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
+    const { error } = await getRealSupabaseClient()
+      .from("profiles")
+      .update({
+        username: updated.username || null,
+        full_name: updated.full_name,
+        initials: updated.initials,
+        role: updated.role,
+        id_number: updated.id_number || "",
+        phone: updated.phone || "",
+      })
+      .eq("id", updated.id);
+    if (error) throw new Error(`No se pudo guardar el perfil en Supabase: ${error.message}`);
+  }
+
+  saveStoredUser(updated);
+  return updated;
 }
 
 // Helpers para finanzas
@@ -472,10 +504,10 @@ export async function syncCaseToDatabase(caseRecord: CaseRecord) {
         obsPayload = obsPayload ? `${obsPayload}\n[PASO_SIGUIENTE]: ${caseRecord.next_step}` : `[PASO_SIGUIENTE]: ${caseRecord.next_step}`;
       }
 
-      await client.from("cases").upsert({
+      const { error } = await client.from("cases").upsert({
         id: caseRecord.id,
         client_id: caseRecord.client_id || null,
-        client_email: caseRecord.client_email || null,
+        client_email: caseRecord.client_email?.trim().toLowerCase() || null,
         client_name: caseRecord.client_name || null,
         radicado: caseRecord.radicado || null,
         title: caseRecord.title,
@@ -491,19 +523,41 @@ export async function syncCaseToDatabase(caseRecord: CaseRecord) {
         current_phase: caseRecord.current_phase || null,
         last_update: new Date().toISOString(),
       });
+      if (error) throw new Error("Error guardando caso en Supabase: " + error.message);
     } catch (e) {
       console.warn("Error syncing case to Supabase", e);
+        throw e;
     }
   }
 }
 
 // Carga todos los casos desde Supabase PostgreSQL (únicamente los casos reales de la base de datos)
-export async function fetchAllCasesFromDatabase(): Promise<CaseRecord[]> {
+export async function fetchAllCasesFromDatabase(
+  profile?: Pick<Profile, "id" | "email"> | null
+): Promise<CaseRecord[]> {
+  const matchesProfile = (caseRecord: CaseRecord) => {
+    if (profile === undefined) return true;
+    if (!profile) return false;
+    const email = (profile.email || "").toLowerCase().trim();
+    return Boolean(
+      (caseRecord.client_id && profile.id && caseRecord.client_id === profile.id) ||
+      (caseRecord.client_email && email && caseRecord.client_email.toLowerCase().trim() === email)
+    );
+  };
+  if (profile === null || (profile && !profile.id && !profile.email)) return [];
+
   const cfg = getSupabaseConfig();
   if (cfg.isConfigured) {
     try {
       const client = getRealSupabaseClient();
-      const { data, error } = await client.from("cases").select("*").order("created_at", { ascending: false });
+      let query = client.from("cases").select("*");
+      if (profile) {
+        const filters = [];
+        if (profile.email) filters.push(`client_email.eq.${profile.email.toLowerCase().trim()}`);
+        if (profile.id) filters.push(`client_id.eq.${profile.id}`);
+        query = query.or(filters.join(","));
+      }
+      const { data, error } = await query.order("created_at", { ascending: false });
       if (!error && Array.isArray(data)) {
         const mappedCases: CaseRecord[] = data.map((c: any) => {
           let nextStep = c.next_step || "";
@@ -519,14 +573,15 @@ export async function fetchAllCasesFromDatabase(): Promise<CaseRecord[]> {
             observations: cleanObs,
           };
         });
-        saveStoredCases(mappedCases);
-        return mappedCases;
+        const visibleCases = mappedCases.filter(matchesProfile);
+        saveStoredCases(visibleCases);
+        return visibleCases;
       }
     } catch (e) {
       console.warn("Could not fetch cases from Supabase, using local", e);
     }
   }
-  return getStoredCases();
+  return getStoredCases().filter(matchesProfile);
 }
 
 // Elimina el caso de Supabase y de local storage
@@ -551,17 +606,23 @@ export async function fetchProfilesOrUsers(): Promise<StoredUser[]> {
       const client = getRealSupabaseClient();
       const { data, error } = await client.from("profiles").select("*");
       if (!error && data && data.length > 0) {
-        return data.map((p: any) => ({
+        const locallyStoredUsers = getStoredUsers();
+        return data.map((p: any) => {
+          const localUser = locallyStoredUsers.find((u) => u.id === p.id || u.email.toLowerCase() === p.email?.toLowerCase());
+          return ({
           id: p.id,
           email: p.email || "",
+          username: p.username || localUser?.username || "",
           full_name: p.full_name || (p.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ? "David Pérez" : "Usuario"),
           initials: p.initials || (p.full_name ? p.full_name.slice(0, 2).toUpperCase() : "US"),
           role: p.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ? "firm" : (p.role || "client"),
           id_number: p.id_number,
           phone: p.phone,
-          password: "",
+          // Supabase no devuelve contraseñas; conserva solo las que esta app ya guardó localmente.
+          password: localUser?.password || "",
           created_at: p.created_at,
-        }));
+          });
+        });
       }
     } catch (e) {
       console.warn("Could not fetch profiles from Supabase, falling back to local users", e);
@@ -575,6 +636,7 @@ export async function fetchProfilesOrUsers(): Promise<StoredUser[]> {
 export async function createUserAccount(
   userData: {
     email: string;
+    username?: string;
     password?: string;
     full_name: string;
     role: "client" | "firm";
@@ -583,29 +645,24 @@ export async function createUserAccount(
   },
   currentAuthUser?: { email?: string | null; role?: string } | null
 ): Promise<{ success: boolean; user?: StoredUser; message?: string }> {
-  // Validación estricta: Solo Super Admin y Administradores pueden crear cuentas
   if (currentAuthUser && !canCreateAccounts(currentAuthUser)) {
     throw new Error("Acceso denegado: Únicamente el Super Admin y los administradores autorizados pueden crear cuentas.");
   }
 
   const cleanEmail = userData.email.trim().toLowerCase();
+  const accountPassword = userData.password?.trim() || "";
+  if (!cleanEmail) return { success: false, message: "No se pudo generar el acceso para este usuario." };
+  if (accountPassword.length < 6) return { success: false, message: "La contraseña debe tener al menos 6 caracteres." };
+
   const isSuperAdmin = cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase();
   const finalRole = isSuperAdmin ? "firm" : userData.role;
-
-  // Genera un UUID v4 formal para compatibilidad estricta con PostgreSQL UUID
-  const generatedId = generateUuid();
-
   const newUser: StoredUser = {
-    id: generatedId,
+    id: generateUuid(),
     email: cleanEmail,
-    password: userData.password || "Cliente2026*",
+    username: userData.username?.trim().toLowerCase() || cleanEmail.split("@")[0],
+    password: accountPassword,
     full_name: userData.full_name.trim(),
-    initials: userData.full_name
-      .split(" ")
-      .map((p) => p[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2) || "US",
+    initials: userData.full_name.split(" ").map((part) => part[0]).join("").toUpperCase().slice(0, 2) || "US",
     role: finalRole,
     id_number: userData.id_number?.trim() || "",
     phone: userData.phone?.trim() || "",
@@ -613,70 +670,75 @@ export async function createUserAccount(
   };
 
   const cfg = getSupabaseConfig();
+  let requiresEmailConfirmation = false;
   if (cfg.isConfigured) {
     try {
       const client = getRealSupabaseClient();
-
-      // 1. Verificar si ya existe en profiles para reusar su ID
-      const { data: existingProfile } = await client
+      const authClient = createClient(cfg.url, cfg.anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+      });
+      const { data: existingProfile, error: lookupError } = await client
         .from("profiles")
         .select("id")
         .eq("email", cleanEmail)
         .maybeSingle();
+      if (lookupError) throw new Error("No se pudo comprobar el perfil: " + lookupError.message);
+      if (existingProfile?.id) newUser.id = existingProfile.id;
 
-      if (existingProfile?.id) {
-        newUser.id = existingProfile.id;
-      }
-
-      // 2. Intentar registrar en Supabase Auth (crea usuario y credenciales)
-      try {
-        const { data: signUpData, error: signUpError } = await client.auth.signUp({
-          email: cleanEmail,
-          password: userData.password || "Cliente2026*",
-          options: {
-            data: {
-              full_name: newUser.full_name,
-              role: newUser.role,
-              id_number: newUser.id_number,
-              phone: newUser.phone,
-            },
+      const { data: signUpData, error: signUpError } = await authClient.auth.signUp({
+        email: cleanEmail,
+        password: accountPassword,
+        options: {
+          data: {
+            full_name: newUser.full_name,
+            username: newUser.username,
+            role: newUser.role,
+            id_number: newUser.id_number,
+            phone: newUser.phone,
           },
-        });
+        },
+      });
 
-        if (signUpData?.user?.id) {
-          newUser.id = signUpData.user.id;
-        }
-
-        if (signUpError && !signUpError.message.includes("already registered")) {
-          console.warn("Supabase auth signUp notice:", signUpError.message);
-        }
-      } catch (authErr) {
-        console.warn("Notice during auth.signUp:", authErr);
+      if (signUpError) {
+        return {
+          success: false,
+          message: signUpError.message.toLowerCase().includes("already registered")
+            ? "Ya existe una cuenta con esa abreviatura. Elija otro nombre de usuario."
+            : signUpError.message,
+        };
       }
+      if (!signUpData?.user?.id) return { success: false, message: "Supabase no devolvió la cuenta creada." };
 
-      // 3. Upsert SIEMPRE en la tabla profiles de Supabase para que se refleje de inmediato
+      newUser.id = signUpData.user.id;
+      requiresEmailConfirmation = !signUpData.session;
+
       const { error: profileUpsertError } = await client.from("profiles").upsert({
         id: newUser.id,
         email: cleanEmail,
+        username: newUser.username,
         full_name: newUser.full_name,
         initials: newUser.initials,
         role: newUser.role,
         id_number: newUser.id_number,
         phone: newUser.phone,
       });
-
-      if (profileUpsertError) {
-        console.warn("Aviso upsert profile en Supabase:", profileUpsertError.message);
-      }
-    } catch (e: any) {
-      console.warn("Error creando usuario en Supabase", e);
+      if (profileUpsertError) throw new Error("No se pudo guardar el perfil: " + profileUpsertError.message);
+    } catch (error: any) {
+      console.warn("Error creando usuario en Supabase", error);
+      return { success: false, message: error?.message || "Error creando usuario en Supabase." };
     }
   }
 
   saveStoredUser(newUser);
+  if (requiresEmailConfirmation) {
+    return {
+      success: false,
+      user: newUser,
+      message: "La cuenta se creó, pero Supabase todavía exige confirmar el acceso. Desactive Confirm Email para permitir el ingreso sin verificación.",
+    };
+  }
   return { success: true, user: newUser, message: "Usuario creado y registrado exitosamente" };
 }
-
 // Elimina un usuario de Supabase y localmente
 export async function deleteUserAccount(userId: string, email: string): Promise<boolean> {
   if (email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
@@ -753,6 +815,23 @@ export function saveStoredDocuments(data: DocumentItem[]) {
 
 // Sincroniza un documento tanto en el almacenamiento local como en la tabla public.documents de Supabase
 export async function syncDocumentToDatabase(doc: DocumentItem) {
+  if (!doc.case_id) throw new Error("El documento debe estar vinculado a un expediente.");
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
+    const client = getRealSupabaseClient();
+    const { error } = await client.from("documents").upsert({
+      id: doc.id,
+      case_id: doc.case_id,
+      name: doc.name,
+      category: doc.category,
+      file_size: doc.file_size,
+      uploaded_at: doc.uploaded_at || new Date().toISOString(),
+      download_url: doc.download_url || null,
+      status: doc.status || "Oficial",
+    });
+    if (error) throw error;
+  }
+
   const allDocs = getStoredDocuments();
   const index = allDocs.findIndex((d) => d.id === doc.id);
   let updatedDocs: DocumentItem[];
@@ -762,41 +841,17 @@ export async function syncDocumentToDatabase(doc: DocumentItem) {
     updatedDocs = [doc, ...allDocs];
   }
   saveStoredDocuments(updatedDocs);
-
-  const cfg = getSupabaseConfig();
-  if (cfg.isConfigured) {
-    try {
-      const client = getRealSupabaseClient();
-      await client.from("documents").upsert({
-        id: doc.id,
-        case_id: doc.case_id,
-        name: doc.name,
-        category: doc.category,
-        file_size: doc.file_size,
-        uploaded_at: doc.uploaded_at || new Date().toISOString(),
-        download_url: doc.download_url || null,
-        status: doc.status || "Oficial",
-      });
-    } catch (e) {
-      console.warn("Error sincronizando documento con Supabase", e);
-    }
-  }
 }
 
 // Elimina un documento de Supabase y localmente
 export async function deleteDocumentFromDatabase(docId: string) {
-  const allDocs = getStoredDocuments();
-  saveStoredDocuments(allDocs.filter((d) => d.id !== docId));
-
   const cfg = getSupabaseConfig();
   if (cfg.isConfigured) {
-    try {
-      const client = getRealSupabaseClient();
-      await client.from("documents").delete().eq("id", docId);
-    } catch (e) {
-      console.warn("Error eliminando documento de Supabase", e);
-    }
+    const client = getRealSupabaseClient();
+    const { error } = await client.from("documents").delete().eq("id", docId);
+    if (error) throw error;
   }
+  saveStoredDocuments(getStoredDocuments().filter((d) => d.id !== docId));
 }
 
 // Carga los documentos de un caso desde Supabase si está disponible
@@ -811,14 +866,14 @@ export async function fetchDocumentsForCaseFromDatabase(caseId: string): Promise
         .eq("case_id", caseId)
         .order("uploaded_at", { ascending: false });
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data as DocumentItem[];
       }
     } catch (e) {
       console.warn("Could not fetch documents from Supabase", e);
     }
   }
-  return getStoredDocuments().filter((d) => !d.case_id || d.case_id === caseId);
+  return getStoredDocuments().filter((d) => d.case_id === caseId);
 }
 
 // Sube un documento al bucket 'case-documents' de Supabase Storage e incorpora su registro
@@ -968,6 +1023,7 @@ export async function syncAllLocalDataToSupabase(): Promise<{
       await client.from("profiles").upsert({
         id: u.id,
         email: u.email.toLowerCase().trim(),
+        username: u.username || u.email.split("@")[0],
         full_name: u.full_name,
         initials: u.initials,
         role: u.role,
@@ -984,7 +1040,7 @@ export async function syncAllLocalDataToSupabase(): Promise<{
   const localCases = getStoredCases();
   for (const c of localCases) {
     try {
-      await client.from("cases").upsert({
+      const { error } = await client.from("cases").upsert({
         id: c.id,
         client_id: c.client_id || null,
         client_email: c.client_email ? c.client_email.toLowerCase().trim() : null,
@@ -1141,23 +1197,80 @@ function notifyAuthChange(event: string, session: Session | null) {
   authListeners.forEach((listener) => listener(event, session));
 }
 
+export function normalizeLoginUsername(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/^(dr|dra)\.?\s*/, "")
+    .replace(/\s+/g, ".")
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/\.+/g, ".")
+    .replace(/^\.|\.$/g, "");
+}
+
+const ADMIN_USERNAME_ALIASES: Record<string, string> = {
+  marlondavid: ADMIN_1_EMAIL.toLowerCase(),
+  abogadossebastianariza: ADMIN_2_EMAIL.toLowerCase(),
+};
+
+function matchesLoginUsername(user: { email: string; full_name?: string; username?: string }, username: string): boolean {
+  const emailUsername = user.email.split("@")[0];
+  const nameUsername = (user.full_name || "").replace(/^(dr|dra)\.?\s*/i, "");
+  const profileUsername = user.username || "";
+  return [emailUsername, nameUsername, profileUsername].some((value) => normalizeLoginUsername(value) === username);
+}
 // Función centralizada y blindada para autenticación con Supabase y modo local
 export async function loginWithCredentials(
   emailInput: string,
   passwordInput: string
 ): Promise<{ success: boolean; session?: Session; error?: string }> {
   await new Promise((res) => setTimeout(res, 180));
-  const cleanEmail = (emailInput || "").trim().toLowerCase();
+  const loginIdentifier = (emailInput || "").trim();
   const rawPassword = (passwordInput || "").trim();
+  const cfg = getSupabaseConfig();
 
-  if (!cleanEmail) {
-    return { success: false, error: "Por favor ingrese su correo electrónico." };
+  if (!loginIdentifier) {
+    return { success: false, error: "Por favor ingrese su usuario." };
   }
   if (!rawPassword) {
     return { success: false, error: "Por favor ingrese su contraseña." };
   }
+  if (loginIdentifier.includes("@")) {
+    return { success: false, error: "Ingrese solo su usuario abreviado, por ejemplo marlon.jimenez." };
+  }
 
-  const cfg = getSupabaseConfig();
+  const normalizedUsername = normalizeLoginUsername(loginIdentifier);
+  let cleanEmail = ADMIN_USERNAME_ALIASES[normalizedUsername] || "";
+
+  if (!cleanEmail) {
+    const localUser = getStoredUsers().find((user) => matchesLoginUsername(user, normalizedUsername));
+    if (localUser) cleanEmail = localUser.email.toLowerCase().trim();
+  }
+
+  if (!cleanEmail && cfg.isConfigured) {
+    try {
+      const client = getRealSupabaseClient();
+      const { data, error } = await client.from("profiles").select("email, full_name, username").limit(500);
+      if (!error && data) {
+        const profile = data.find((user: any) => user.email && matchesLoginUsername(user, normalizedUsername));
+        if (profile?.email) cleanEmail = String(profile.email).toLowerCase().trim();
+      }
+    } catch (error) {
+      console.warn("No se pudo buscar el usuario en perfiles de Supabase:", error);
+    }
+  }
+
+  // Las cuentas corporativas usan un correo interno derivado del username.
+  // Esto permite iniciar sesión aunque RLS impida consultar profiles antes de autenticar.
+  if (!cleanEmail && cfg.isConfigured) {
+    cleanEmail = `${normalizedUsername}@${LOGIN_EMAIL_DOMAIN}`.toLowerCase();
+  }
+
+  if (!cleanEmail) {
+    return { success: false, error: "Usuario no encontrado. Verifique el usuario asignado por la firma." };
+  }
 
   // =========================================================================
   // CASO 1: ADMINISTRADORES DE LA FIRMA (David Pérez, Dr. Marlon Jiménez, Dr. Sebastián Ariza)
@@ -1178,7 +1291,7 @@ export async function loginWithCredentials(
     if (!isMasterPassword) {
       return {
         success: false,
-        error: `Contraseña incorrecta para el Administrador (${firmAdminUser.full_name}). La clave oficial es: Admin2026* (con A mayúscula y asterisco al final).`,
+        error: "Usuario o contraseña incorrectos. Verifique sus datos e intente nuevamente.",
       };
     }
 
@@ -1267,33 +1380,13 @@ export async function loginWithCredentials(
         const lower = msg.toLowerCase();
         // Las cuentas creadas no deben requerir validación ni confirmación por correo para ingresar
         if (lower.includes("email not confirmed")) {
-          const users = getStoredUsers();
-          let localUser = users.find((u) => u.email.toLowerCase() === cleanEmail);
-          if (!localUser) {
-            let remoteProf: any = null;
-            try {
-              const { data: prof } = await client.from("profiles").select("*").eq("email", cleanEmail).maybeSingle();
-              remoteProf = prof;
-            } catch {}
-            localUser = {
-              id: remoteProf?.id || generateUuid(),
-              email: cleanEmail,
-              password: rawPassword,
-              full_name: remoteProf?.full_name || cleanEmail.split("@")[0],
-              initials: remoteProf?.initials || "CL",
-              role: (remoteProf?.role as any) || "client",
-              id_number: remoteProf?.id_number || "C.C. Registrada",
-              phone: remoteProf?.phone || "",
-              created_at: new Date().toISOString(),
-            };
-            saveStoredUser(localUser);
-          }
-          const session = createUserSession(localUser);
-          notifyAuthChange("SIGNED_IN", session);
-          return { success: true, session };
+          return {
+            success: false,
+            error: "Esta cuenta sigue pendiente en Supabase. En tu proyecto abre Authentication → Sign In / Providers → Email y desactiva Confirm email. Después vuelve a iniciar sesión con tu usuario y contraseña.",
+          };
         }
         if (lower.includes("invalid login credentials")) {
-          msg = "Credenciales incorrectas o cuenta no registrada. Verifique su correo y clave.";
+          msg = "Credenciales incorrectas o cuenta no registrada. Verifique su usuario y contraseña.";
         }
         return { success: false, error: msg };
       }
@@ -1309,7 +1402,7 @@ export async function loginWithCredentials(
   if (!found) {
     return {
       success: false,
-      error: "Cuenta no registrada. Si es cliente nuevo, puede crear su cuenta directamente con correo y contraseña.",
+      error: "Usuario o contraseña incorrectos. Si necesita acceso, solicítelo a la firma.",
     };
   }
 
@@ -1742,6 +1835,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT,
+  username TEXT,
   full_name TEXT,
   initials TEXT,
   role TEXT DEFAULT 'client',
@@ -1752,6 +1846,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 
 -- Asegurar columnas si la tabla public.profiles ya existía previamente
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS initials TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'client';
@@ -1948,7 +2043,7 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
--- 8. POLÍTICAS DE SEGURIDAD (RLS) HABILITADAS Y PERMISIVAS
+-- 8. POLÍTICAS RLS: cada cliente solo puede leer sus casos y datos relacionados
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agenda_items ENABLE ROW LEVEL SECURITY;
@@ -1959,20 +2054,71 @@ ALTER TABLE public.financial_records ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Acceso total profiles" ON public.profiles;
 CREATE POLICY "Acceso total profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Acceso total cases" ON public.cases;
-CREATE POLICY "Acceso total cases" ON public.cases FOR ALL USING (true) WITH CHECK (true);
+-- Quitar políticas previas para que ninguna regla amplia anule estas restricciones.
+DO $$
+DECLARE
+  table_name TEXT;
+  policy_row RECORD;
+BEGIN
+  FOREACH table_name IN ARRAY ARRAY['cases', 'agenda_items', 'history_items', 'documents', 'financial_records'] LOOP
+    FOR policy_row IN
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = table_name
+    LOOP
+      EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', policy_row.policyname, table_name);
+    END LOOP;
+  END LOOP;
+END $$;
 
-DROP POLICY IF EXISTS "Acceso total agenda" ON public.agenda_items;
-CREATE POLICY "Acceso total agenda" ON public.agenda_items FOR ALL USING (true) WITH CHECK (true);
+-- Los administradores del despacho pueden gestionar todos los registros.
+CREATE POLICY "Administradores gestionan casos" ON public.cases
+  FOR ALL TO authenticated
+  USING (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'))
+  WITH CHECK (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'));
 
-DROP POLICY IF EXISTS "Acceso total history" ON public.history_items;
-CREATE POLICY "Acceso total history" ON public.history_items FOR ALL USING (true) WITH CHECK (true);
+-- Los clientes solo leen los casos asignados por UID o correo.
+CREATE POLICY "Clientes leen casos asignados" ON public.cases
+  FOR SELECT TO authenticated
+  USING (
+    client_id = auth.uid()::text
+    OR lower(trim(coalesce(client_email, ''))) = lower(trim(coalesce(auth.jwt()->>'email', '')))
+  );
 
-DROP POLICY IF EXISTS "Acceso total documents" ON public.documents;
-CREATE POLICY "Acceso total documents" ON public.documents FOR ALL USING (true) WITH CHECK (true);
+-- Agenda, historial y documentos quedan visibles solo para el despacho y el cliente asignado al caso.
+CREATE POLICY "Administradores gestionan agenda" ON public.agenda_items
+  FOR ALL TO authenticated
+  USING (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'))
+  WITH CHECK (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'));
+CREATE POLICY "Clientes leen agenda asignada" ON public.agenda_items
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.cases c WHERE c.id = agenda_items.case_id AND (c.client_id = auth.uid()::text OR lower(trim(coalesce(c.client_email, ''))) = lower(trim(coalesce(auth.jwt()->>'email', ''))))));
 
-DROP POLICY IF EXISTS "Acceso total finances" ON public.financial_records;
-CREATE POLICY "Acceso total finances" ON public.financial_records FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Administradores gestionan historial" ON public.history_items
+  FOR ALL TO authenticated
+  USING (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'))
+  WITH CHECK (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'));
+CREATE POLICY "Clientes leen historial asignado" ON public.history_items
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.cases c WHERE c.id = history_items.case_id AND (c.client_id = auth.uid()::text OR lower(trim(coalesce(c.client_email, ''))) = lower(trim(coalesce(auth.jwt()->>'email', ''))))));
+
+CREATE POLICY "Administradores gestionan documentos" ON public.documents
+  FOR ALL TO authenticated
+  USING (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'))
+  WITH CHECK (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'));
+CREATE POLICY "Clientes leen documentos asignados" ON public.documents
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.cases c WHERE c.id = documents.case_id AND (c.client_id = auth.uid()::text OR lower(trim(coalesce(c.client_email, ''))) = lower(trim(coalesce(auth.jwt()->>'email', ''))))));
+
+CREATE POLICY "Administradores gestionan finanzas" ON public.financial_records
+  FOR ALL TO authenticated
+  USING (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'))
+  WITH CHECK (lower(coalesce(auth.jwt()->>'email', '')) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co', 'contacto@jalegal.com.co'));
+CREATE POLICY "Clientes leen finanzas asignadas" ON public.financial_records
+  FOR SELECT TO authenticated
+  USING (
+    client_id = auth.uid()::text
+    OR EXISTS (SELECT 1 FROM public.cases c WHERE c.id = financial_records.case_id AND (c.client_id = auth.uid()::text OR lower(trim(coalesce(c.client_email, ''))) = lower(trim(coalesce(auth.jwt()->>'email', '')))))
+  );
 
 -- 9. INSERTAR / SINCRONIZAR LOS 3 ADMINISTRADORES TITULARES EN PUBLIC.PROFILES
 INSERT INTO public.profiles (id, email, full_name, initials, role, id_number, phone)
