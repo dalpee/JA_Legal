@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import logo from "../assets/ja-legal-logo.svg";
+import emblemLogo from "../assets/ja-legal-emblem.svg";
 import {
   supabase,
   getStoredCase,
@@ -17,6 +18,7 @@ import {
   generateUuid,
   getStoredFinances,
   saveStoredFinances,
+  syncFinancialRecordToDatabase,
   resetAllToDefault,
   isConfiguredWithRealSupabase,
   getStoredCases,
@@ -32,21 +34,23 @@ import {
   ADMIN_2_EMAIL,
   INITIAL_FIRM_ADMINS,
   loginWithCredentials,
+  registerDirectClientAccount,
   type StoredUser,
 } from "../lib/supabaseClient";
 import { defaultProfile, firmProfile, caseTemplates } from "../data/initialData";
 import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem, FinancialRecord } from "../types/portal";
 import { CreateCaseModal } from "./CreateCaseModal";
 import { AdminDashboard } from "./AdminDashboard";
-import { CaseEditorDrawer } from "./CaseEditorDrawer";
 import { PresentationBanner } from "./PresentationBanner";
 import { DocumentModal } from "./DocumentModal";
 import { FinanceSection } from "./FinanceSection";
 import { LegalCalculator } from "./LegalCalculator";
 import { SupabaseCasesTable } from "./SupabaseCasesTable";
+import { CaseDashboard } from "./CaseDashboard";
 import { SystemArchitectureModal } from "./SystemArchitectureModal";
 import { ThemeToggle } from "./ThemeToggle";
-import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText, Download } from "./icons";
+import { startContinuousDatabaseTask, getCurrentSyncStatus, type SyncStatusInfo } from "../lib/syncService";
+import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText, Download, Upload } from "./icons";
 import "./ClientPortal.css";
 
 interface ClientPortalProps {
@@ -98,9 +102,9 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [prefillClientName, setPrefillClientName] = useState("");
   const [registeredUsersList, setRegisteredUsersList] = useState<StoredUser[]>([]);
 
-  // Sección activa en el portal
+  // Sección activa en el portal (incluye nuevo tablero de casos CaseDashboard)
   const [activeSection, setActiveSection] = useState<
-    "resumen" | "proceso" | "agenda" | "documentos" | "historial" | "economia" | "calculadora" | "admin"
+    "resumen" | "tablero" | "proceso" | "agenda" | "documentos" | "historial" | "economia" | "calculadora" | "admin"
   >("resumen");
   const [adminSubTab, setAdminSubTab] = useState<"casos" | "clientes" | "conexion_supabase">("casos");
 
@@ -120,13 +124,42 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [docDataUrl, setDocDataUrl] = useState<string | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
-  // Estados de Autenticación Real (Solo Login, sin registro público ni recuperación en login)
+  // Estados de Autenticación (Solo cuentas creadas, con registro directo sin validación para clientes)
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [registerName, setRegisterName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Estado de conexión continua y sincronización en tiempo real
+  const [syncStatus, setSyncStatus] = useState<SyncStatusInfo>(() => getCurrentSyncStatus());
+
+  // Tarea continua para mantener la base de datos siempre conectada y actualizada en cualquier momento
+  useEffect(() => {
+    const stopTask = startContinuousDatabaseTask({
+      onCasesUpdated: (updatedCases) => {
+        setAllCases(updatedCases);
+        setCaseRecord((prev) => {
+          if (!prev) return updatedCases[0] || null;
+          const found = updatedCases.find((c) => c.id === prev.id);
+          return found || updatedCases[0] || null;
+        });
+      },
+      onFinancesUpdated: (updatedFinances) => {
+        setFinances(updatedFinances);
+      },
+      onStatusChanged: (status) => {
+        setSyncStatus(status);
+      },
+    });
+
+    return () => {
+      stopTask();
+    };
+  }, []);
 
   // Sesión inicial + escucha de cambios
   useEffect(() => {
@@ -295,6 +328,26 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     setPrefillClientId("");
     setPrefillClientEmail("");
     setPrefillClientName("");
+
+    // Sincronizar automáticamente en la sección de economía para que se refleje de inmediato
+    const existingFinIdx = finances.findIndex((f) => f.case_id === savedCase.id || f.concept === savedCase.title);
+    if (existingFinIdx >= 0) {
+      const prevFin = finances[existingFinIdx];
+      const updatedFin: FinancialRecord = {
+        ...prevFin,
+        case_name: savedCase.title,
+        client_name: savedCase.client_name,
+        total_pactado: savedCase.total_fees,
+        saldo_pendiente: savedCase.balance,
+        abono_recibido: Math.max(0, savedCase.total_fees - savedCase.balance),
+        marlon_recibe: Math.round((Math.max(0, savedCase.total_fees - savedCase.balance) * (prevFin.pct_marlon ?? 60)) / 100),
+        sebastian_recibe: Math.round((Math.max(0, savedCase.total_fees - savedCase.balance) * (prevFin.pct_sebastian ?? 40)) / 100),
+      };
+      const newFinances = finances.map((f, i) => (i === existingFinIdx ? updatedFin : f));
+      setFinances(newFinances);
+      saveStoredFinances(newFinances);
+      syncFinancialRecordToDatabase(updatedFin);
+    }
   };
 
   const handleDeleteCase = async (caseId: string) => {
@@ -436,6 +489,24 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     saveStoredFinances(updated);
   };
 
+  const handleUpdateTransaction = (updatedRecord: FinancialRecord) => {
+    const updated = finances.map((f) => (f.id === updatedRecord.id ? updatedRecord : f));
+    setFinances(updated);
+    saveStoredFinances(updated);
+    syncFinancialRecordToDatabase(updatedRecord);
+
+    if (updatedRecord.case_id) {
+      const associatedCase = allCases.find((c) => c.id === updatedRecord.case_id);
+      if (associatedCase) {
+        handleUpdateCase({
+          ...associatedCase,
+          balance: updatedRecord.saldo_pendiente ?? associatedCase.balance,
+          total_fees: updatedRecord.total_pactado ?? associatedCase.total_fees,
+        });
+      }
+    }
+  };
+
   const handleApplyLiquidationToCase = (summary: string, totalAmount: number) => {
     if (caseRecord) {
       handleUpdateCase({
@@ -527,6 +598,27 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     }
   }
 
+  // Registro directo de cliente sin necesidad de validación ni verificación de correo
+  async function handleRegister(event?: FormEvent) {
+    if (event) event.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+    setSubmitting(true);
+
+    try {
+      const res = await registerDirectClientAccount(email, password, registerName);
+      if (res.success && res.session) {
+        setSession(res.session);
+      } else {
+        setAuthError(res.error || "No se pudo registrar la cuenta. Verifique los datos.");
+      }
+    } catch (err: any) {
+      setAuthError(err.message || "Error al crear la cuenta.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   // Acceso directo con 1 clic para cualquiera de los 3 Administradores
   async function handleQuickLogin(targetEmail: string, targetName: string) {
     setEmail(targetEmail);
@@ -578,17 +670,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
     return (
       <main className="portal-dashboard">
-        {/* Barra superior de herramientas y simulación */}
-        <PresentationBanner
-          onOpenEditor={() => setIsEditorOpen(true)}
-          onLoadTemplate={handleLoadTemplate}
-          onPrintReport={handlePrintReport}
-          isPresentationMode={isPresentationMode}
-          onTogglePresentationMode={() => setIsPresentationMode(!isPresentationMode)}
-          userRole={profile.role}
-          onToggleRole={handleToggleRole}
-        />
-
         <header className="portal-topbar">
           <button type="button" onClick={handleBack} className="portal-back">
             ← Volver a la página
@@ -613,23 +694,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
             <ThemeToggle />
 
-            {isFirm && (
-              <button
-                type="button"
-                onClick={() => setIsEditorOpen(true)}
-                className="portal-logout"
-                style={{
-                  borderColor: "var(--brass)",
-                  color: "var(--brass-light)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                }}
-              >
-                <Sliders size={14} />
-                <span>Gestionar Proceso</span>
-              </button>
-            )}
             <button className="portal-logout" type="button" onClick={handleLogout}>
               Cerrar sesión
             </button>
@@ -689,25 +753,8 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                   >
                     <span>👥 Usuarios &amp; Cuentas</span>
                     <small style={{ color: "#38bdf8", fontWeight: 700 }}>
-                      Supabase ({registeredUsersList.length > 0 ? registeredUsersList.length : getStoredUsers().length})
+                      {registeredUsersList.length > 0 ? registeredUsersList.length : getStoredUsers().length} cuentas
                     </small>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={activeSection === "admin" && adminSubTab === "conexion_supabase" ? "active" : ""}
-                    onClick={() => {
-                      setActiveSection("admin");
-                      setAdminSubTab("conexion_supabase");
-                    }}
-                    style={{
-                      borderLeft: activeSection === "admin" && adminSubTab === "conexion_supabase" ? "3px solid #eab308" : "none",
-                      background: activeSection === "admin" && adminSubTab === "conexion_supabase" ? "rgba(234, 179, 8, 0.18)" : "rgba(234, 179, 8, 0.05)",
-                      fontWeight: 700,
-                    }}
-                  >
-                    <span>⚡ Conexión Supabase</span>
-                    <small style={{ color: "#eab308", fontWeight: 700 }}>SQL / Nube</small>
                   </button>
                 </>
               )}
@@ -719,6 +766,21 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               >
                 <span>Resumen</span>
               </button>
+
+              <button
+                type="button"
+                className={activeSection === "tablero" ? "active" : ""}
+                onClick={() => setActiveSection("tablero")}
+                style={{
+                  borderLeft: activeSection === "tablero" ? "3px solid #38bdf8" : "none",
+                  background: activeSection === "tablero" ? "rgba(56, 189, 248, 0.15)" : "transparent",
+                }}
+              >
+                <span>📋 Tablero de Casos</span>
+                <small style={{ color: "#38bdf8", fontWeight: 700 }}>
+                  {allCases.length} casos
+                </small>
+              </button>
               <button
                 type="button"
                 className={activeSection === "proceso" ? "active" : ""}
@@ -729,7 +791,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               >
                 <span>Procesos</span>
                 <small style={{ color: "var(--brass-light)", fontWeight: 700 }}>
-                  Supabase
+                  {allCases.length > 0 ? `${allCases.length} activos` : "Expediente"}
                 </small>
               </button>
               <button
@@ -903,8 +965,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                         gap: "6px",
                       }}
                     >
-                      <Sliders size={13} />
-                      <span>Editar Caso & Adelantos</span>
+                      <span>✏️ Editar Caso</span>
                     </button>
                   )}
                 </div>
@@ -926,52 +987,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 </p>
               </div>
             )}
-
-            <button
-              type="button"
-              onClick={() => setIsArchModalOpen(true)}
-              style={{
-                background: "transparent",
-                border: "1px dashed var(--line)",
-                color: "var(--text-muted)",
-                fontSize: "0.72rem",
-                padding: "8px 10px",
-                borderRadius: "4px",
-                cursor: "pointer",
-                textAlign: "left",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                width: "100%",
-                transition: "all 0.2s ease",
-              }}
-              title="Ficha técnica de ingeniería de sistemas"
-            >
-              <span>📐 Especificación & Auditoría</span>
-            </button>
-
-            <div
-              style={{
-                padding: "8px 10px",
-                borderRadius: "4px",
-                background: isConfiguredWithRealSupabase ? "rgba(34, 197, 94, 0.12)" : "rgba(234, 179, 8, 0.12)",
-                border: `1px solid ${isConfiguredWithRealSupabase ? "rgba(34, 197, 94, 0.35)" : "rgba(234, 179, 8, 0.35)"}`,
-                fontSize: "0.72rem",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <span style={{ fontSize: "0.85rem" }}>{isConfiguredWithRealSupabase ? "🟢" : "🟠"}</span>
-              <div>
-                <strong style={{ color: isConfiguredWithRealSupabase ? "#4ade80" : "#facc15", display: "block" }}>
-                  {isConfiguredWithRealSupabase ? "Supabase Cloud: Conectado" : "Supabase: Modo Local"}
-                </strong>
-                <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>
-                  {isConfiguredWithRealSupabase ? "PostgreSQL activo en la nube" : "Sin variables .env (Autónomo)"}
-                </span>
-              </div>
-            </div>
           </aside>
 
           <section className="portal-content" id="resumen">
@@ -1016,8 +1031,32 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 finances={finances}
                 onAddTransaction={handleAddTransaction}
                 onDeleteTransaction={handleDeleteTransaction}
+                onUpdateTransaction={handleUpdateTransaction}
                 userProfile={profile}
                 caseRecord={caseRecord}
+              />
+            )}
+
+            {/* SECCIÓN NUEVA: TABLERO DE CASOS (CASEDASHBOARD) */}
+            {activeSection === "tablero" && (
+              <CaseDashboard
+                cases={allCases}
+                currentProfile={profile}
+                onSelectCase={(selected) => {
+                  setCaseRecord(selected);
+                  setActiveSection("resumen");
+                }}
+                onEditCase={(selected) => {
+                  setEditingCase(selected);
+                  setIsCreateCaseModalOpen(true);
+                }}
+                onDeleteCase={(cId) => {
+                  handleDeleteCase(cId);
+                }}
+                onNewCase={() => {
+                  setEditingCase(null);
+                  setIsCreateCaseModalOpen(true);
+                }}
               />
             )}
 
@@ -1039,7 +1078,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               />
             )}
 
-            {!loadingData && !caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && activeSection !== "proceso" && (
+            {!loadingData && !caseRecord && activeSection !== "economia" && activeSection !== "calculadora" && activeSection !== "admin" && activeSection !== "proceso" && activeSection !== "tablero" && (
               <div className="portal-empty" style={{ textAlign: "center", padding: "48px 24px" }}>
                 <span style={{ fontSize: "2.8rem", display: "block", marginBottom: "14px" }}>
                   {isFirm ? "⚖️" : "📂"}
@@ -1305,7 +1344,8 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
                 {/* TAB: RESUMEN */}
                 {activeSection === "resumen" && (
-                  <div className="portal-main-grid">
+                  <>
+                    <div className="portal-main-grid">
                     {/* Próximas Citas y Audiencias */}
                     <article className="portal-panel">
                       <div className="panel-title-row">
@@ -1387,7 +1427,173 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                       </button>
                     </article>
                   </div>
-                )}
+
+                  {/* ADJUNTADOR DE ARCHIVOS A LA VISTA EN EL DETALLE DEL CASO */}
+                  <article
+                    className="portal-panel"
+                    style={{
+                      marginTop: "20px",
+                      border: "2px dashed var(--brass)",
+                      borderRadius: "8px",
+                      padding: "20px",
+                      background: "var(--ink-soft)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: "10px",
+                        marginBottom: "14px",
+                      }}
+                    >
+                      <div>
+                        <p className="kicker" style={{ color: "var(--brass)", margin: 0 }}>
+                          Expediente Digital Oficial &amp; Adjuntador
+                        </p>
+                        <h3 style={{ margin: "4px 0 0", color: "var(--text-bright)", fontSize: "1.15rem" }}>
+                          Documentos &amp; Pruebas del Caso ({documents.filter((d) => !d.case_id || d.case_id === caseRecord.id).length})
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsAddDocModalOpen(true)}
+                        className="btn primary"
+                        style={{
+                          padding: "8px 16px",
+                          fontSize: "0.8rem",
+                          fontWeight: 700,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}
+                      >
+                        <Upload size={14} />
+                        <span>+ Adjuntar Archivo a la Vista</span>
+                      </button>
+                    </div>
+
+                    <p style={{ margin: "0 0 14px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                      Archivos oficiales almacenados en Supabase Storage (autos, providencias, poderes, demandas y constancias de pago).
+                    </p>
+
+                    {documents.filter((d) => !d.case_id || d.case_id === caseRecord.id).length === 0 ? (
+                      <div
+                        style={{
+                          textAlign: "center",
+                          padding: "24px",
+                          background: "var(--parchment-deep)",
+                          borderRadius: "6px",
+                          border: "1px dashed var(--line)",
+                        }}
+                      >
+                        <p style={{ margin: "0 0 10px", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                          Aún no hay archivos adjuntos en este proceso.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddDocModalOpen(true)}
+                          className="btn primary"
+                          style={{ padding: "6px 14px", fontSize: "0.78rem" }}
+                        >
+                          + Adjuntar Primer Archivo
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "10px" }}>
+                        {documents
+                          .filter((d) => !d.case_id || d.case_id === caseRecord.id)
+                          .map((doc) => (
+                            <div
+                              key={doc.id}
+                              style={{
+                                background: "var(--parchment-deep)",
+                                border: "1px solid var(--line)",
+                                borderRadius: "6px",
+                                padding: "10px 14px",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                            >
+                              <div style={{ overflow: "hidden", display: "flex", alignItems: "center", gap: "8px" }}>
+                                <FileText size={18} color="var(--brass)" />
+                                <div>
+                                  <strong
+                                    style={{
+                                      color: "var(--text-bright)",
+                                      fontSize: "0.82rem",
+                                      display: "block",
+                                      textOverflow: "ellipsis",
+                                      overflow: "hidden",
+                                      whiteSpace: "nowrap",
+                                      maxWidth: "160px",
+                                    }}
+                                  >
+                                    {doc.name}
+                                  </strong>
+                                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                                    {doc.category} · {doc.file_size || "1.2 MB"}
+                                  </span>
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: "6px" }}>
+                                {doc.download_url && (
+                                  <a
+                                    href={doc.download_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      padding: "4px 8px",
+                                      background: "rgba(217, 181, 106, 0.2)",
+                                      color: "var(--brass-light)",
+                                      border: "1px solid var(--brass)",
+                                      borderRadius: "4px",
+                                      fontSize: "0.72rem",
+                                      fontWeight: 600,
+                                      textDecoration: "none",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "3px",
+                                    }}
+                                  >
+                                    <Download size={12} />
+                                    <span>Ver</span>
+                                  </a>
+                                )}
+                                {isFirm && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (window.confirm(`¿Eliminar documento "${doc.name}"?`)) {
+                                        await deleteDocumentFromDatabase(doc.id);
+                                        const updatedDocs = documents.filter((d) => d.id !== doc.id);
+                                        setDocuments(updatedDocs);
+                                      }
+                                    }}
+                                    style={{
+                                      background: "transparent",
+                                      border: "1px solid rgba(239, 68, 68, 0.4)",
+                                      color: "#f87171",
+                                      borderRadius: "4px",
+                                      padding: "4px 6px",
+                                      cursor: "pointer",
+                                    }}
+                                    title="Eliminar archivo"
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </article>
+                </>
+              )}
 
                 {/* TAB: CALENDARIO */}
                 {activeSection === "agenda" && (
@@ -1700,30 +1906,6 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
           prefilledClientName={prefillClientName}
         />
 
-        {/* Drawer modificador de caso (solo firma) */}
-        {caseRecord && (
-          <CaseEditorDrawer
-            isOpen={isEditorOpen}
-            onClose={() => setIsEditorOpen(false)}
-            caseRecord={caseRecord}
-            onUpdateCase={handleUpdateCase}
-            agenda={agenda}
-            onUpdateAgenda={handleUpdateAgenda}
-            history={history}
-            onUpdateHistory={handleUpdateHistory}
-            documents={documents}
-            onUpdateDocuments={handleUpdateDocuments}
-            profile={profile}
-            onUpdateProfile={handleUpdateProfile}
-            onResetDefaults={handleResetDefaults}
-            onLoadTemplate={handleLoadTemplate}
-            onEnterPresentationMode={() => {
-              setIsEditorOpen(false);
-              setIsPresentationMode(true);
-            }}
-          />
-        )}
-
         {/* Modal de Documentos */}
         {caseRecord && (
           <DocumentModal
@@ -1947,306 +2129,358 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
       </div>
 
       <section className="portal-card login-card" style={{ maxWidth: "480px", padding: "28px 24px" }}>
-        <img src={logo} alt="Jiménez &amp; Ariza Asociados" className="portal-logo" style={{ maxWidth: "180px", margin: "0 auto 14px" }} />
+        <img
+          src={emblemLogo}
+          alt="Jiménez &amp; Ariza Asociados"
+          className="portal-logo"
+          style={{
+            maxWidth: "140px",
+            height: "auto",
+            margin: "0 auto 16px",
+            display: "block",
+            filter: "drop-shadow(0 4px 14px rgba(212, 159, 57, 0.28))",
+          }}
+        />
 
         <p className="kicker" style={{ textAlign: "center" }}>Acceso Corporativo Seguro</p>
         <h1 style={{ fontSize: "1.35rem", marginBottom: "6px", textAlign: "center" }}>
           Portal de Clientes &amp; Despacho
         </h1>
         <p className="portal-text" style={{ fontSize: "0.82rem", marginBottom: "18px", textAlign: "center", color: "var(--text-muted)" }}>
-          Ingrese sus credenciales autorizadas para consultar y gestionar sus expedientes judiciales.
+          {authMode === "login"
+            ? "Consulte y gestione sus expedientes con sus credenciales autorizadas."
+            : "Cree su cuenta directamente con correo y contraseña. Acceso instantáneo sin verificación previa."}
         </p>
 
-        {authSuccess && <p className="auth-success-msg">{authSuccess}</p>}
-        {authError && (
-          <div style={{ marginBottom: "16px" }}>
-            <p className="portal-form-error" style={{ marginBottom: "8px" }}>{authError}</p>
-            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin(SUPER_ADMIN_EMAIL, "David Pérez")}
-                style={{
-                  background: "rgba(217, 181, 106, 0.15)",
-                  border: "1px solid var(--brass)",
-                  color: "var(--brass-light)",
-                  borderRadius: "4px",
-                  padding: "5px 10px",
-                  fontSize: "0.72rem",
-                  cursor: "pointer",
-                  flex: 1,
-                }}
-              >
-                ⚡ Ingresar como David
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin(ADMIN_1_EMAIL, "Dr. Marlon Jiménez")}
-                style={{
-                  background: "rgba(56, 189, 248, 0.15)",
-                  border: "1px solid #38bdf8",
-                  color: "#38bdf8",
-                  borderRadius: "4px",
-                  padding: "5px 10px",
-                  fontSize: "0.72rem",
-                  cursor: "pointer",
-                  flex: 1,
-                }}
-              >
-                ⚡ Ingresar como Dr. Marlon
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin(ADMIN_2_EMAIL, "Dr. Sebastián Ariza")}
-                style={{
-                  background: "rgba(74, 222, 128, 0.15)",
-                  border: "1px solid #4ade80",
-                  color: "#4ade80",
-                  borderRadius: "4px",
-                  padding: "5px 10px",
-                  fontSize: "0.72rem",
-                  cursor: "pointer",
-                  flex: 1,
-                }}
-              >
-                ⚡ Ingresar como Dr. Sebastián
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ======================================================== */}
-        {/* PANEL: CLAVES DE LOS 3 ADMINISTRADORES (ACCESO DIRECTO)   */}
-        {/* ======================================================== */}
+        {/* Selector de modo: Iniciar Sesión vs Crear Cuenta */}
         <div
           style={{
-            background: "rgba(217, 181, 106, 0.06)",
-            border: "1px solid rgba(217, 181, 106, 0.35)",
+            display: "flex",
+            background: "rgba(255, 255, 255, 0.04)",
+            padding: "4px",
             borderRadius: "6px",
-            padding: "14px 16px",
+            border: "1px solid var(--line)",
             marginBottom: "18px",
-            textAlign: "left",
+            gap: "4px",
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-            <span style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--brass)", fontWeight: 700 }}>
-              🔑 Claves de los 3 Administradores
-            </span>
-            <span style={{ fontSize: "0.68rem", background: "var(--brass)", color: "var(--ink)", padding: "2px 7px", borderRadius: "3px", fontWeight: 700 }}>
-              Clave Maestra: Admin2026*
-            </span>
-          </div>
-
-          <p style={{ margin: "0 0 10px", fontSize: "0.76rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
-            Los 3 administradores tienen acceso total y la misma contraseña: <strong style={{ color: "var(--brass-light)" }}>Admin2026*</strong> (A mayúscula y asterisco).
-          </p>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {/* 1. David Pérez */}
-            <div
-              style={{
-                background: "var(--parchment-deep)",
-                border: "1px solid var(--line)",
-                padding: "8px 10px",
-                borderRadius: "4px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: "6px",
-              }}
-            >
-              <div>
-                <span style={{ fontSize: "0.68rem", color: "var(--brass)", fontWeight: 700, display: "block" }}>
-                  👑 Super Admin Titular
-                </span>
-                <strong style={{ fontSize: "0.82rem", color: "var(--text-bright)" }}>David Pérez</strong>
-                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "block" }}>{SUPER_ADMIN_EMAIL}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin(SUPER_ADMIN_EMAIL, "David Pérez")}
-                disabled={submitting}
-                style={{
-                  background: "var(--brass)",
-                  color: "var(--ink)",
-                  border: "none",
-                  borderRadius: "3px",
-                  padding: "5px 10px",
-                  fontSize: "0.74rem",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                ⚡ Entrar
-              </button>
-            </div>
-
-            {/* 2. Dr. Marlon Jiménez */}
-            <div
-              style={{
-                background: "var(--parchment-deep)",
-                border: "1px solid var(--line)",
-                padding: "8px 10px",
-                borderRadius: "4px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: "6px",
-              }}
-            >
-              <div>
-                <span style={{ fontSize: "0.68rem", color: "#38bdf8", fontWeight: 700, display: "block" }}>
-                  ⚖️ Socio Administrador 1
-                </span>
-                <strong style={{ fontSize: "0.82rem", color: "var(--text-bright)" }}>Dr. Marlon Jiménez</strong>
-                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "block" }}>{ADMIN_1_EMAIL}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin(ADMIN_1_EMAIL, "Dr. Marlon Jiménez")}
-                disabled={submitting}
-                style={{
-                  background: "#38bdf8",
-                  color: "#0f172a",
-                  border: "none",
-                  borderRadius: "3px",
-                  padding: "5px 10px",
-                  fontSize: "0.74rem",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                ⚡ Entrar
-              </button>
-            </div>
-
-            {/* 3. Dr. Sebastián Ariza */}
-            <div
-              style={{
-                background: "var(--parchment-deep)",
-                border: "1px solid var(--line)",
-                padding: "8px 10px",
-                borderRadius: "4px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: "6px",
-              }}
-            >
-              <div>
-                <span style={{ fontSize: "0.68rem", color: "#4ade80", fontWeight: 700, display: "block" }}>
-                  ⚖️ Socio Administrador 2
-                </span>
-                <strong style={{ fontSize: "0.82rem", color: "var(--text-bright)" }}>Dr. Felipe Sebastián Ariza</strong>
-                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", display: "block" }}>{ADMIN_2_EMAIL}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin(ADMIN_2_EMAIL, "Dr. Sebastián Ariza")}
-                disabled={submitting}
-                style={{
-                  background: "#4ade80",
-                  color: "#0f172a",
-                  border: "none",
-                  borderRadius: "3px",
-                  padding: "5px 10px",
-                  fontSize: "0.74rem",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                ⚡ Entrar
-              </button>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setAuthMode("login");
+              setAuthError(null);
+            }}
+            style={{
+              flex: 1,
+              padding: "8px 12px",
+              borderRadius: "4px",
+              border: "none",
+              fontSize: "0.82rem",
+              fontWeight: authMode === "login" ? 700 : 500,
+              background: authMode === "login" ? "var(--brass)" : "transparent",
+              color: authMode === "login" ? "var(--ink)" : "var(--text-muted)",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          >
+            Iniciar Sesión
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAuthMode("register");
+              setAuthError(null);
+            }}
+            style={{
+              flex: 1,
+              padding: "8px 12px",
+              borderRadius: "4px",
+              border: "none",
+              fontSize: "0.82rem",
+              fontWeight: authMode === "register" ? 700 : 500,
+              background: authMode === "register" ? "var(--brass)" : "transparent",
+              color: authMode === "register" ? "var(--ink)" : "var(--text-muted)",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          >
+            Crear Cuenta (Cliente)
+          </button>
         </div>
 
-        {/* ======================================================== */}
-        {/* GUÍA RÁPIDA: DÓNDE SE REFLEJAN LAS CUENTAS EN SUPABASE   */}
-        {/* ======================================================== */}
-        <details
-          style={{
-            background: "rgba(56, 189, 248, 0.05)",
-            border: "1px solid rgba(56, 189, 248, 0.25)",
-            borderRadius: "6px",
-            padding: "10px 14px",
-            marginBottom: "18px",
-            fontSize: "0.78rem",
-            color: "var(--text)",
-            textAlign: "left",
-          }}
-        >
-          <summary style={{ cursor: "pointer", fontWeight: 700, color: "#38bdf8", outline: "none" }}>
-            🌐 ¿Dónde veo reflejada la creación de cuentas de Supabase?
-          </summary>
-          <div style={{ marginTop: "8px", lineHeight: 1.5, color: "var(--text-muted)" }}>
-            <p style={{ margin: "0 0 6px" }}>
-              <strong>1. En tu Consola de Supabase (supabase.com/dashboard):</strong>
-            </p>
-            <ul style={{ margin: 0, paddingLeft: "18px" }}>
-              <li><strong>Authentication → Users:</strong> Credenciales y correo electrónico con su UID.</li>
-              <li><strong>Table Editor → profiles:</strong> Nombre completo, rol (<code style={{ color: "var(--brass-light)" }}>firm</code> o <code style={{ color: "var(--brass-light)" }}>client</code>), cédula y teléfono.</li>
-              <li><strong>Table Editor → cases:</strong> Casos asignados al correo del cliente.</li>
-            </ul>
-            <p style={{ margin: "8px 0 0" }}>
-              <strong>2. En este Portal:</strong> Ingresa con cualquiera de los 3 botones de arriba y ve a la pestaña <strong>"👥 Usuarios &amp; Cuentas"</strong> en el menú lateral.
-            </p>
-          </div>
-        </details>
+        {authSuccess && <p className="auth-success-msg">{authSuccess}</p>}
+        {authError && <p className="portal-form-error" style={{ marginBottom: "14px" }}>{authError}</p>}
 
-        {/* FORMULARIO MANUAL DE INICIO DE SESIÓN */}
-        <form className="portal-form" onSubmit={handleLogin}>
-          <label>
-            Correo electrónico
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="eldavidprz@gmail.com"
-              required
-              autoFocus
-            />
-          </label>
+        {authMode === "login" ? (
+          <>
+            {/* Panel de Administradores de la Firma */}
+            <div
+              style={{
+                background: "rgba(217, 181, 106, 0.06)",
+                border: "1px solid rgba(217, 181, 106, 0.35)",
+                borderRadius: "6px",
+                padding: "12px 14px",
+                marginBottom: "18px",
+                textAlign: "left",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <span style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--brass)", fontWeight: 700 }}>
+                  Acceso Rápido Socios Titulares
+                </span>
+                <span style={{ fontSize: "0.68rem", background: "var(--brass)", color: "var(--ink)", padding: "2px 7px", borderRadius: "3px", fontWeight: 700 }}>
+                  Clave: Admin2026*
+                </span>
+              </div>
 
-          <label>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>Contraseña</span>
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--brass-light)",
-                  fontSize: "0.74rem",
-                  cursor: "pointer",
-                  padding: "0 4px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "4px",
-                }}
-              >
-                {showPassword ? "🙈 Ocultar" : "👁️ Ver contraseña"}
-              </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {/* 1. David Pérez */}
+                <div
+                  style={{
+                    background: "var(--parchment-deep)",
+                    border: "1px solid var(--line)",
+                    padding: "7px 10px",
+                    borderRadius: "4px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontSize: "0.8rem", color: "var(--text-bright)", display: "block" }}>David Pérez</strong>
+                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{SUPER_ADMIN_EMAIL}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin(SUPER_ADMIN_EMAIL, "David Pérez")}
+                    disabled={submitting}
+                    style={{
+                      background: "var(--brass)",
+                      color: "var(--ink)",
+                      border: "none",
+                      borderRadius: "3px",
+                      padding: "4px 8px",
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Entrar
+                  </button>
+                </div>
+
+                {/* 2. Dr. Marlon Jiménez */}
+                <div
+                  style={{
+                    background: "var(--parchment-deep)",
+                    border: "1px solid var(--line)",
+                    padding: "7px 10px",
+                    borderRadius: "4px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontSize: "0.8rem", color: "var(--text-bright)", display: "block" }}>Dr. Marlon Jiménez</strong>
+                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{ADMIN_1_EMAIL}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin(ADMIN_1_EMAIL, "Dr. Marlon Jiménez")}
+                    disabled={submitting}
+                    style={{
+                      background: "#38bdf8",
+                      color: "#0f172a",
+                      border: "none",
+                      borderRadius: "3px",
+                      padding: "4px 8px",
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Entrar
+                  </button>
+                </div>
+
+                {/* 3. Dr. Sebastián Ariza */}
+                <div
+                  style={{
+                    background: "var(--parchment-deep)",
+                    border: "1px solid var(--line)",
+                    padding: "7px 10px",
+                    borderRadius: "4px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontSize: "0.8rem", color: "var(--text-bright)", display: "block" }}>Dr. Felipe Sebastián Ariza</strong>
+                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{ADMIN_2_EMAIL}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin(ADMIN_2_EMAIL, "Dr. Sebastián Ariza")}
+                    disabled={submitting}
+                    style={{
+                      background: "#4ade80",
+                      color: "#0f172a",
+                      border: "none",
+                      borderRadius: "3px",
+                      padding: "4px 8px",
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Entrar
+                  </button>
+                </div>
+              </div>
             </div>
-            <div style={{ position: "relative" }}>
+
+            {/* FORMULARIO MANUAL DE INICIO DE SESIÓN */}
+            <form className="portal-form" onSubmit={handleLogin}>
+              <label>
+                Correo electrónico
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="su-correo@ejemplo.com"
+                  required
+                  autoFocus
+                />
+              </label>
+
+              <label>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>Contraseña</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--brass-light)",
+                      fontSize: "0.74rem",
+                      cursor: "pointer",
+                      padding: "0 4px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    {showPassword ? "🙈 Ocultar" : "👁️ Ver contraseña"}
+                  </button>
+                </div>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                    style={{ paddingRight: "40px", width: "100%" }}
+                  />
+                </div>
+              </label>
+
+              <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "12px", width: "100%", padding: "12px", fontWeight: 700 }}>
+                {submitting ? "Iniciando sesión…" : "Ingresar a mi Caso"}
+              </button>
+            </form>
+          </>
+        ) : (
+          /* FORMULARIO DE REGISTRO DIRECTO (SIN VALIDACIÓN POR CORREO) */
+          <form className="portal-form" onSubmit={handleRegister}>
+            <div
+              style={{
+                background: "rgba(56, 189, 248, 0.08)",
+                border: "1px solid rgba(56, 189, 248, 0.3)",
+                borderRadius: "6px",
+                padding: "10px 12px",
+                marginBottom: "14px",
+                fontSize: "0.76rem",
+                color: "var(--text-muted)",
+                lineHeight: 1.45,
+              }}
+            >
+              <strong style={{ color: "#38bdf8", display: "block", marginBottom: "2px" }}>
+                Acceso directo e instantáneo
+              </strong>
+              Cree su cuenta con su correo y contraseña. No se requieren códigos de validación ni esperar confirmación por correo; entrará directamente a ver su expediente.
+            </div>
+
+            <label>
+              Nombre completo (Opcional)
+              <input
+                type="text"
+                value={registerName}
+                onChange={(e) => setRegisterName(e.target.value)}
+                placeholder="Ej: Pedro Gómez"
+              />
+            </label>
+
+            <label>
+              Correo electrónico
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="cliente@ejemplo.com"
+                required
+                autoFocus
+              />
+            </label>
+
+            <label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Contraseña</span>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--brass-light)",
+                    fontSize: "0.74rem",
+                    cursor: "pointer",
+                    padding: "0 4px",
+                  }}
+                >
+                  {showPassword ? "🙈 Ocultar" : "👁️ Ver"}
+                </button>
+              </div>
               <input
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Admin2026*"
+                placeholder="Defina su contraseña"
                 required
-                style={{ paddingRight: "40px", width: "100%" }}
+                minLength={4}
               />
-            </div>
-          </label>
+            </label>
 
-          <button className="btn primary" type="submit" disabled={submitting} style={{ marginTop: "12px", width: "100%", padding: "12px", fontWeight: 700 }}>
-            {submitting ? "Verificando credenciales…" : "Iniciar Sesión"}
-          </button>
-        </form>
+            <button
+              className="btn primary"
+              type="submit"
+              disabled={submitting}
+              style={{
+                marginTop: "14px",
+                width: "100%",
+                padding: "12px",
+                fontWeight: 700,
+                background: "var(--brass)",
+                color: "var(--ink)",
+              }}
+            >
+              {submitting ? "Creando cuenta e ingresando…" : "Crear Cuenta e Ingresar"}
+            </button>
+          </form>
+        )}
 
         <div style={{ marginTop: "24px", paddingTop: "14px", borderTop: "1px solid var(--line)", textAlign: "center" }}>
           <p style={{ margin: 0, fontSize: "0.74rem", color: "var(--text-muted)" }}>

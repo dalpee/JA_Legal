@@ -30,7 +30,6 @@ export const navigation: NavigationItem[] = [
   { label: "La firma", href: "#quienes-somos" },
   { label: "Servicios", href: "#servicios" },
   { label: "Equipo", href: "#equipo" },
-  { label: "Preguntas Frecuentes", href: "#faq" },
   { label: "Contacto", href: "#contacto" },
 ];
 

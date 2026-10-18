@@ -355,53 +355,7 @@ export function AdminDashboard({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-      {/* Banner de Estado de Conexión a Supabase */}
-      <div
-        style={{
-          background: isSupabaseLive ? "rgba(34, 197, 94, 0.08)" : "rgba(234, 179, 8, 0.08)",
-          border: `1px solid ${isSupabaseLive ? "rgba(34, 197, 94, 0.35)" : "rgba(234, 179, 8, 0.35)"}`,
-          borderRadius: "8px",
-          padding: "12px 18px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "12px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{ fontSize: "1.2rem" }}>{isSupabaseLive ? "🟢" : "🟠"}</span>
-          <div>
-            <strong style={{ color: isSupabaseLive ? "#4ade80" : "#facc15", fontSize: "0.88rem", display: "block" }}>
-              {isSupabaseLive
-                ? `Conexión a Supabase Activa (${currentCfg.url})`
-                : "Modo Local Activo — Conecte su Supabase para guardar en la nube"}
-            </strong>
-            <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
-              {isSupabaseLive
-                ? "Los casos y usuarios se sincronizan con su base de datos PostgreSQL."
-                : "Actualmente los datos se guardan en el navegador. Ingrese su URL y API Key en la pestaña '⚡ Conexión Supabase'."}
-            </span>
-          </div>
-        </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("conexion_supabase")}
-          style={{
-            background: "transparent",
-            border: `1px solid ${isSupabaseLive ? "#4ade80" : "#facc15"}`,
-            color: isSupabaseLive ? "#4ade80" : "#facc15",
-            padding: "6px 14px",
-            borderRadius: "4px",
-            fontSize: "0.75rem",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          {isSupabaseLive ? "⚙️ Administrar Conexión Supabase" : "⚡ Conectar mi Supabase ahora"}
-        </button>
-      </div>
 
       {/* Encabezado del Dashboard de Administración */}
       <div

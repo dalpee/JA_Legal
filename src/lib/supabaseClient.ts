@@ -1,5 +1,5 @@
 import { createClient, Session } from "@supabase/supabase-js";
-import { defaultProfile, defaultAgenda, defaultHistory, defaultDocuments, defaultFinances } from "../data/initialData";
+import { defaultProfile, defaultAgenda, defaultHistory, defaultDocuments, defaultFinances, excelCases } from "../data/initialData";
 import { Profile, CaseRecord, AgendaItem, HistoryItem, DocumentItem, FinancialRecord } from "../types/portal";
 
 // Super Admin Titular definido por el usuario
@@ -63,16 +63,19 @@ export function generateUuid(): string {
   });
 }
 
-// Obtiene la configuración activa de Supabase (prioriza lo ingresado en la interfaz, luego variables de entorno)
+export const DEFAULT_SUPABASE_URL = "https://emvnqsigrfthqopwnveh.supabase.co";
+export const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_--rNZVtU6IscWjjq528G9A_e3mc2I8O";
+
+// Obtiene la configuración activa de Supabase (prioriza lo ingresado en la interfaz, luego variables de entorno, luego credenciales por defecto de la firma)
 export function getSupabaseConfig(): { url: string; anonKey: string; isConfigured: boolean } {
   try {
     const savedUrl = localStorage.getItem(STORAGE_SUPABASE_URL_KEY) || "";
     const savedKey = localStorage.getItem(STORAGE_SUPABASE_ANON_KEY) || "";
     const envUrl = (import.meta.env.VITE_SUPABASE_URL as string) || "";
-    const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || "";
+    const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string) || "";
 
-    const activeUrl = (savedUrl.trim() || envUrl.trim());
-    const activeKey = (savedKey.trim() || envKey.trim());
+    const activeUrl = (savedUrl.trim() || envUrl.trim() || DEFAULT_SUPABASE_URL);
+    const activeKey = (savedKey.trim() || envKey.trim() || DEFAULT_SUPABASE_ANON_KEY);
 
     const isConfigured = Boolean(
       activeUrl &&
@@ -87,7 +90,7 @@ export function getSupabaseConfig(): { url: string; anonKey: string; isConfigure
       isConfigured,
     };
   } catch {
-    return { url: "", anonKey: "", isConfigured: false };
+    return { url: DEFAULT_SUPABASE_URL, anonKey: DEFAULT_SUPABASE_ANON_KEY, isConfigured: true };
   }
 }
 
@@ -254,7 +257,10 @@ export function updateUserPassword(userIdOrEmail: string, newPassword: string): 
 export function getStoredFinances(): FinancialRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_FINANCES_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
   } catch (e) {
     console.warn("Error reading stored finances", e);
   }
@@ -269,14 +275,158 @@ export function saveStoredFinances(data: FinancialRecord[]) {
   }
 }
 
+export async function syncFinancialRecordToDatabase(record: FinancialRecord) {
+  const current = getStoredFinances();
+  const idx = current.findIndex((f) => f.id === record.id);
+  const updated = idx >= 0 ? current.map((f) => (f.id === record.id ? record : f)) : [record, ...current];
+  saveStoredFinances(updated);
+
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
+    try {
+      const client = getRealSupabaseClient();
+      const metaPayload = JSON.stringify({
+        total_pactado: record.total_pactado ?? record.amount,
+        abono_recibido: record.abono_recibido ?? record.amount,
+        saldo_pendiente: record.saldo_pendiente ?? 0,
+        forma_cobro: record.forma_cobro || record.payment_method || "Transferencia",
+        pct_marlon: record.pct_marlon ?? 60,
+        pct_sebastian: record.pct_sebastian ?? 40,
+        marlon_recibe: record.marlon_recibe ?? 0,
+        sebastian_recibe: record.sebastian_recibe ?? 0,
+        payment_status: record.payment_status || (record.status === "completado" ? "Pagado" : "Pendiente"),
+        fecha_ultimo_abono: record.fecha_ultimo_abono || record.date,
+        case_name: record.case_name || record.concept,
+        userNotes: record.notes || "",
+      });
+
+      await client.from("financial_records").upsert({
+        id: record.id,
+        case_id: record.case_id || null,
+        client_id: record.client_id || null,
+        client_name: record.client_name || null,
+        type: ((record.type as string) === "egreso" || (record.type as string) === "gasto") ? "egreso" : "ingreso",
+        category: record.category || "Honorarios",
+        concept: record.concept || record.case_name || "Honorarios",
+        amount: Number(record.amount || record.abono_recibido || 0),
+        date: record.date || new Date().toISOString().slice(0, 10),
+        status: record.status || "completado",
+        payment_method: record.forma_cobro || record.payment_method || "Transferencia",
+        receipt_number: record.receipt_number || `REC-${record.id.slice(0, 8)}`,
+        notes: metaPayload,
+      });
+    } catch (e) {
+      console.warn("Error syncing financial record to Supabase", e);
+    }
+  }
+}
+
+export async function deleteFinancialRecordFromDatabase(id: string) {
+  const current = getStoredFinances();
+  const updated = current.filter((f) => f.id !== id);
+  saveStoredFinances(updated);
+
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
+    try {
+      const client = getRealSupabaseClient();
+      await client.from("financial_records").delete().eq("id", id);
+    } catch (e) {
+      console.warn("Error deleting financial record from Supabase", e);
+    }
+  }
+}
+
+export async function fetchAllFinancesFromDatabase(): Promise<FinancialRecord[]> {
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
+    try {
+      const client = getRealSupabaseClient();
+      const { data, error } = await client.from("financial_records").select("*").order("date", { ascending: false });
+      if (!error && Array.isArray(data)) {
+        const mapped: FinancialRecord[] = data.map((row: any) => {
+          let parsedNotes = row.notes || "";
+          let total_pactado = row.amount;
+          let abono_recibido = row.amount;
+          let saldo_pendiente = 0;
+          let forma_cobro = row.payment_method || "Transferencia";
+          let pct_marlon = 60;
+          let pct_sebastian = 40;
+          let marlon_recibe = Math.round(row.amount * 0.6);
+          let sebastian_recibe = Math.round(row.amount * 0.4);
+          let payment_status: "Pagado" | "Abono parcial" | "Pendiente" =
+            row.status === "completado" ? "Pagado" : "Pendiente";
+          let fecha_ultimo_abono = row.date;
+          let case_name = row.concept;
+
+          if (row.notes && typeof row.notes === "string" && row.notes.startsWith("{")) {
+            try {
+              const meta = JSON.parse(row.notes);
+              total_pactado = meta.total_pactado ?? total_pactado;
+              abono_recibido = meta.abono_recibido ?? abono_recibido;
+              saldo_pendiente = meta.saldo_pendiente ?? saldo_pendiente;
+              forma_cobro = meta.forma_cobro || forma_cobro;
+              pct_marlon = meta.pct_marlon ?? pct_marlon;
+              pct_sebastian = meta.pct_sebastian ?? pct_sebastian;
+              marlon_recibe = meta.marlon_recibe ?? marlon_recibe;
+              sebastian_recibe = meta.sebastian_recibe ?? sebastian_recibe;
+              if (meta.payment_status === "Pagado" || meta.payment_status === "Abono parcial" || meta.payment_status === "Pendiente") {
+                payment_status = meta.payment_status;
+              }
+              fecha_ultimo_abono = meta.fecha_ultimo_abono || fecha_ultimo_abono;
+              case_name = meta.case_name || case_name;
+              parsedNotes = meta.userNotes || "";
+            } catch {}
+          }
+
+          return {
+            id: row.id,
+            case_id: row.case_id,
+            case_name,
+            client_id: row.client_id,
+            client_name: row.client_name,
+            type: row.type,
+            category: row.category,
+            concept: row.concept,
+            amount: row.amount,
+            total_pactado,
+            abono_recibido,
+            saldo_pendiente,
+            forma_cobro,
+            pct_marlon,
+            pct_sebastian,
+            marlon_recibe,
+            sebastian_recibe,
+            payment_status,
+            fecha_ultimo_abono,
+            date: row.date,
+            status: row.status,
+            payment_method: row.payment_method,
+            receipt_number: row.receipt_number,
+            notes: parsedNotes,
+          };
+        });
+        saveStoredFinances(mapped);
+        return mapped;
+      }
+    } catch (e) {
+      console.warn("Could not fetch finances from Supabase, using local", e);
+    }
+  }
+  return getStoredFinances();
+}
+
 export function getStoredCases(): CaseRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_CASES_LIST_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
   } catch (e) {
     console.warn("Error reading stored cases", e);
   }
-  return [];
+  return excelCases;
 }
 
 export function saveStoredCases(data: CaseRecord[]) {
@@ -317,23 +467,28 @@ export async function syncCaseToDatabase(caseRecord: CaseRecord) {
   if (cfg.isConfigured) {
     try {
       const client = getRealSupabaseClient();
+      let obsPayload = caseRecord.observations || "";
+      if (caseRecord.next_step && !obsPayload.includes("[PASO_SIGUIENTE]:")) {
+        obsPayload = obsPayload ? `${obsPayload}\n[PASO_SIGUIENTE]: ${caseRecord.next_step}` : `[PASO_SIGUIENTE]: ${caseRecord.next_step}`;
+      }
+
       await client.from("cases").upsert({
         id: caseRecord.id,
-        client_id: caseRecord.client_id,
-        client_email: caseRecord.client_email,
-        client_name: caseRecord.client_name,
-        radicado: caseRecord.radicado,
+        client_id: caseRecord.client_id || null,
+        client_email: caseRecord.client_email || null,
+        client_name: caseRecord.client_name || null,
+        radicado: caseRecord.radicado || null,
         title: caseRecord.title,
         process_type: caseRecord.process_type,
         status: caseRecord.status,
-        progress: caseRecord.progress,
-        balance: caseRecord.balance,
-        total_fees: caseRecord.total_fees,
-        authority: caseRecord.authority,
+        progress: Number(caseRecord.progress) || 0,
+        balance: Number(caseRecord.balance) || 0,
+        total_fees: Number(caseRecord.total_fees) || 0,
+        authority: caseRecord.authority || "Juzgado",
         city: caseRecord.city || "Bogotá D.C.",
-        lawyer: caseRecord.lawyer,
-        observations: caseRecord.observations,
-        current_phase: caseRecord.current_phase,
+        lawyer: caseRecord.lawyer || "J&A Legal",
+        observations: obsPayload || null,
+        current_phase: caseRecord.current_phase || null,
         last_update: new Date().toISOString(),
       });
     } catch (e) {
@@ -342,16 +497,30 @@ export async function syncCaseToDatabase(caseRecord: CaseRecord) {
   }
 }
 
-// Carga todos los casos desde Supabase PostgreSQL o desde almacenamiento local
+// Carga todos los casos desde Supabase PostgreSQL (únicamente los casos reales de la base de datos)
 export async function fetchAllCasesFromDatabase(): Promise<CaseRecord[]> {
   const cfg = getSupabaseConfig();
   if (cfg.isConfigured) {
     try {
       const client = getRealSupabaseClient();
       const { data, error } = await client.from("cases").select("*").order("created_at", { ascending: false });
-      if (!error && data) {
-        saveStoredCases(data);
-        return data;
+      if (!error && Array.isArray(data)) {
+        const mappedCases: CaseRecord[] = data.map((c: any) => {
+          let nextStep = c.next_step || "";
+          let cleanObs = c.observations || "";
+          if (!nextStep && cleanObs.includes("[PASO_SIGUIENTE]:")) {
+            const parts = cleanObs.split("[PASO_SIGUIENTE]:");
+            cleanObs = parts[0].trim();
+            nextStep = parts[1].trim();
+          }
+          return {
+            ...c,
+            next_step: nextStep,
+            observations: cleanObs,
+          };
+        });
+        saveStoredCases(mappedCases);
+        return mappedCases;
       }
     } catch (e) {
       console.warn("Could not fetch cases from Supabase, using local", e);
@@ -778,6 +947,7 @@ export async function uploadDocumentToSupabaseStorage(
 export async function syncAllLocalDataToSupabase(): Promise<{
   success: boolean;
   casesCount: number;
+  financesCount: number;
   usersCount: number;
   docsCount: number;
   message: string;
@@ -831,6 +1001,7 @@ export async function syncAllLocalDataToSupabase(): Promise<{
         lawyer: c.lawyer || null,
         observations: c.observations || null,
         current_phase: c.current_phase || null,
+        next_step: c.next_step || null,
       });
       casesCount++;
     } catch (e) {
@@ -858,12 +1029,49 @@ export async function syncAllLocalDataToSupabase(): Promise<{
     }
   }
 
+  // 4. Sincronizar registros financieros (Modelo Excel)
+  let financesCount = 0;
+  const localFinances = getStoredFinances();
+  for (const f of localFinances) {
+    try {
+      await client.from("financial_records").upsert({
+        id: f.id,
+        case_id: f.case_id,
+        case_name: f.case_name || f.concept || "",
+        client_id: f.client_id,
+        client_name: f.client_name || "",
+        type: f.type,
+        category: f.category,
+        amount: f.amount ?? f.total_pactado ?? 0,
+        total_pactado: f.total_pactado ?? f.amount ?? 0,
+        forma_cobro: f.forma_cobro || f.payment_method || "Transferencia",
+        abono_recibido: f.abono_recibido ?? 0,
+        saldo_pendiente: f.saldo_pendiente ?? Math.max(0, (f.total_pactado ?? f.amount ?? 0) - (f.abono_recibido ?? 0)),
+        pct_marlon: f.pct_marlon ?? 50,
+        pct_sebastian: f.pct_sebastian ?? 50,
+        marlon_recibe: f.marlon_recibe ?? 0,
+        sebastian_recibe: f.sebastian_recibe ?? 0,
+        payment_status: f.payment_status || (f.status === "completado" ? "Pagado" : "Pendiente"),
+        fecha_ultimo_abono: f.fecha_ultimo_abono || f.date,
+        date: f.date,
+        status: f.status,
+        payment_method: f.payment_method || f.forma_cobro,
+        receipt_number: f.receipt_number,
+        notes: f.notes || null,
+      });
+      financesCount++;
+    } catch (e) {
+      console.warn("Error sincronizando registro financiero a Supabase:", f.id, e);
+    }
+  }
+
   return {
     success: true,
     casesCount,
     usersCount,
     docsCount,
-    message: `¡Sincronización con Supabase exitosa! Se guardaron ${casesCount} procesos, ${usersCount} usuarios y ${docsCount} documentos directamente en tu base de datos.`,
+    financesCount,
+    message: `¡Sincronización con Supabase exitosa! Se guardaron ${casesCount} procesos, ${financesCount} registros financieros, ${usersCount} usuarios y ${docsCount} documentos directamente en tu base de datos.`,
   };
 }
 
@@ -1057,10 +1265,35 @@ export async function loginWithCredentials(
       if (error) {
         let msg = error.message;
         const lower = msg.toLowerCase();
+        // Las cuentas creadas no deben requerir validación ni confirmación por correo para ingresar
+        if (lower.includes("email not confirmed")) {
+          const users = getStoredUsers();
+          let localUser = users.find((u) => u.email.toLowerCase() === cleanEmail);
+          if (!localUser) {
+            let remoteProf: any = null;
+            try {
+              const { data: prof } = await client.from("profiles").select("*").eq("email", cleanEmail).maybeSingle();
+              remoteProf = prof;
+            } catch {}
+            localUser = {
+              id: remoteProf?.id || generateUuid(),
+              email: cleanEmail,
+              password: rawPassword,
+              full_name: remoteProf?.full_name || cleanEmail.split("@")[0],
+              initials: remoteProf?.initials || "CL",
+              role: (remoteProf?.role as any) || "client",
+              id_number: remoteProf?.id_number || "C.C. Registrada",
+              phone: remoteProf?.phone || "",
+              created_at: new Date().toISOString(),
+            };
+            saveStoredUser(localUser);
+          }
+          const session = createUserSession(localUser);
+          notifyAuthChange("SIGNED_IN", session);
+          return { success: true, session };
+        }
         if (lower.includes("invalid login credentials")) {
-          msg = "Credenciales incorrectas o usuario no registrado en Supabase. Verifique su correo y clave.";
-        } else if (lower.includes("email not confirmed")) {
-          msg = "Correo pendiente de confirmación en Supabase. En su panel de Supabase -> Authentication -> Providers -> Email desactive 'Confirm email' para acceso instantáneo.";
+          msg = "Credenciales incorrectas o cuenta no registrada. Verifique su correo y clave.";
         }
         return { success: false, error: msg };
       }
@@ -1069,14 +1302,14 @@ export async function loginWithCredentials(
     }
   }
 
-  // Fallback a almacenamiento local de usuarios registrados
+  // Fallback a almacenamiento de usuarios registrados (cuentas creadas en el sistema)
   const users = getStoredUsers();
   const found = users.find((u) => u.email.toLowerCase() === cleanEmail);
 
   if (!found) {
     return {
       success: false,
-      error: "Usuario no registrado en el sistema. Solicite al despacho crear su cuenta de cliente.",
+      error: "Cuenta no registrada. Si es cliente nuevo, puede crear su cuenta directamente con correo y contraseña.",
     };
   }
 
@@ -1088,6 +1321,88 @@ export async function loginWithCredentials(
   }
 
   const session = createUserSession(found);
+  notifyAuthChange("SIGNED_IN", session);
+  return { success: true, session };
+}
+
+// Crea una cuenta de cliente directamente sin necesidad de validación ni códigos de verificación
+export async function registerDirectClientAccount(
+  emailInput: string,
+  passwordInput: string,
+  fullNameInput?: string
+): Promise<{ success: boolean; session?: Session; error?: string }> {
+  const cleanEmail = (emailInput || "").trim().toLowerCase();
+  const rawPassword = (passwordInput || "").trim();
+
+  if (!cleanEmail) {
+    return { success: false, error: "Por favor ingrese su correo electrónico." };
+  }
+  if (!rawPassword || rawPassword.length < 4) {
+    return { success: false, error: "La contraseña debe tener al menos 4 caracteres." };
+  }
+
+  const name = (fullNameInput || "").trim() || cleanEmail.split("@")[0];
+  const initials = name
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2) || "CL";
+
+  const userId = generateUuid();
+  const newUser: StoredUser = {
+    id: userId,
+    email: cleanEmail,
+    password: rawPassword,
+    full_name: name,
+    initials,
+    role: "client",
+    id_number: "C.C. Registrada",
+    phone: "",
+    created_at: new Date().toISOString(),
+  };
+
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured) {
+    try {
+      const client = getRealSupabaseClient();
+      // Intentar registro en Supabase Auth
+      try {
+        const { data: signUpData } = await client.auth.signUp({
+          email: cleanEmail,
+          password: rawPassword,
+          options: {
+            data: { full_name: name, role: "client" },
+          },
+        });
+        if (signUpData?.user?.id) {
+          newUser.id = signUpData.user.id;
+        }
+      } catch (authErr) {
+        console.warn("Notice during direct register Supabase Auth:", authErr);
+      }
+
+      // Upsert de perfil en Supabase
+      try {
+        await client.from("profiles").upsert({
+          id: newUser.id,
+          email: cleanEmail,
+          full_name: name,
+          initials,
+          role: "client",
+          id_number: "C.C. Registrada",
+        });
+      } catch (profErr) {
+        console.warn("Notice during direct register profile upsert:", profErr);
+      }
+    } catch (err) {
+      console.warn("Notice connecting direct register to Supabase:", err);
+    }
+  }
+
+  // Guardar en usuarios autorizados y crear sesión instantánea
+  saveStoredUser(newUser);
+  const session = createUserSession(newUser);
   notifyAuthChange("SIGNED_IN", session);
   return { success: true, session };
 }
@@ -1485,6 +1800,7 @@ ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS city TEXT DEFAULT 'Bogotá D.C
 ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS lawyer TEXT;
 ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS observations TEXT;
 ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS current_phase TEXT;
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS next_step TEXT;
 ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS last_update TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
@@ -1586,6 +1902,17 @@ ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS status TEXT DEFAUL
 ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS payment_method TEXT;
 ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS receipt_number TEXT;
 ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS total_pactado NUMERIC DEFAULT 0;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS abono_recibido NUMERIC DEFAULT 0;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS saldo_pendiente NUMERIC DEFAULT 0;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS forma_cobro TEXT DEFAULT 'Transferencia';
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS pct_marlon NUMERIC DEFAULT 50;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS pct_sebastian NUMERIC DEFAULT 50;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS marlon_recibe NUMERIC DEFAULT 0;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS sebastian_recibe NUMERIC DEFAULT 0;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Pagado';
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS fecha_ultimo_abono TEXT;
+ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS case_name TEXT;
 ALTER TABLE public.financial_records ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 -- 7. FUNCIÓN Y TRIGGER: CREAR PERFIL AUTOMÁTICO AL REGISTRARSE
@@ -1598,14 +1925,20 @@ BEGIN
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)),
     UPPER(SUBSTRING(COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)), 1, 2)),
-    CASE WHEN LOWER(NEW.email) = 'eldavidprz@gmail.com' THEN 'firm' ELSE COALESCE(NEW.raw_user_meta_data->>'role', 'client') END,
+    CASE 
+      WHEN LOWER(NEW.email) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co') THEN 'firm' 
+      ELSE COALESCE(NEW.raw_user_meta_data->>'role', 'client') 
+    END,
     COALESCE(NEW.raw_user_meta_data->>'id_number', ''),
     COALESCE(NEW.raw_user_meta_data->>'phone', '')
   )
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
     full_name = COALESCE(EXCLUDED.full_name, public.profiles.full_name),
-    role = CASE WHEN LOWER(NEW.email) = 'eldavidprz@gmail.com' THEN 'firm' ELSE EXCLUDED.role END;
+    role = CASE 
+      WHEN LOWER(NEW.email) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co') THEN 'firm' 
+      ELSE EXCLUDED.role 
+    END;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -1641,7 +1974,18 @@ CREATE POLICY "Acceso total documents" ON public.documents FOR ALL USING (true) 
 DROP POLICY IF EXISTS "Acceso total finances" ON public.financial_records;
 CREATE POLICY "Acceso total finances" ON public.financial_records FOR ALL USING (true) WITH CHECK (true);
 
--- 9. SINCRONIZAR USUARIOS YA REGISTRADOS EN AUTH.USERS DE FORMA DINÁMICA Y SEGURA
+-- 9. INSERTAR / SINCRONIZAR LOS 3 ADMINISTRADORES TITULARES EN PUBLIC.PROFILES
+INSERT INTO public.profiles (id, email, full_name, initials, role, id_number, phone)
+VALUES 
+  ('00000000-0000-4000-a000-000000000001', 'eldavidprz@gmail.com', 'David Pérez', 'DP', 'firm', 'Super Admin Titular', '+57 300 000 0000'),
+  ('00000000-0000-4000-a000-000000000002', 'marlon.jimenez@jalegal.com.co', 'Dr. Marlon Jiménez', 'MJ', 'firm', 'T.P. 182.904 del C.S.J. · Socio Administrador', '+57 312 214 9562'),
+  ('00000000-0000-4000-a000-000000000003', 'sebastian.ariza@jalegal.com.co', 'Dr. Felipe Sebastián Ariza Gómez', 'SA', 'firm', 'T.P. 195.420 del C.S.J. · Socio Administrador', '+57 315 220 1199')
+ON CONFLICT (id) DO UPDATE SET
+  role = 'firm',
+  email = EXCLUDED.email,
+  full_name = EXCLUDED.full_name;
+
+-- 10. SINCRONIZAR USUARIOS YA REGISTRADOS EN AUTH.USERS DE FORMA DINÁMICA
 DO $$
 BEGIN
   BEGIN
@@ -1652,30 +1996,31 @@ BEGIN
         email,
         COALESCE(raw_user_meta_data->>''full_name'', SPLIT_PART(email, ''@'', 1), ''Usuario''),
         UPPER(SUBSTRING(COALESCE(raw_user_meta_data->>''full_name'', SPLIT_PART(email, ''@'', 1), ''US''), 1, 2)),
-        CASE WHEN LOWER(email) = ''eldavidprz@gmail.com'' THEN ''firm'' ELSE COALESCE(raw_user_meta_data->>''role'', ''client'') END,
+        CASE 
+          WHEN LOWER(email) IN (''eldavidprz@gmail.com'', ''marlon.jimenez@jalegal.com.co'', ''sebastian.ariza@jalegal.com.co'') THEN ''firm'' 
+          ELSE COALESCE(raw_user_meta_data->>''role'', ''client'') 
+        END,
         COALESCE(raw_user_meta_data->>''id_number'', ''''),
         COALESCE(raw_user_meta_data->>''phone'', '''')
       FROM auth.users
       ON CONFLICT (id) DO UPDATE SET
         email = EXCLUDED.email,
-        role = CASE WHEN LOWER(EXCLUDED.email) = ''eldavidprz@gmail.com'' THEN ''firm'' ELSE public.profiles.role END
+        role = CASE 
+          WHEN LOWER(EXCLUDED.email) IN (''eldavidprz@gmail.com'', ''marlon.jimenez@jalegal.com.co'', ''sebastian.ariza@jalegal.com.co'') THEN ''firm'' 
+          ELSE public.profiles.role 
+        END
     ';
   EXCEPTION WHEN OTHERS THEN
     NULL;
   END;
 END $$;
 
--- 10. ASEGURAR PRIVILEGIOS DE SUPER ADMINISTRADOR PARA ELDAVIDPRZ@GMAIL.COM
-DO $$
-BEGIN
-  BEGIN
-    EXECUTE 'UPDATE public.profiles SET role = ''firm'' WHERE LOWER(email) = ''eldavidprz@gmail.com''';
-  EXCEPTION WHEN OTHERS THEN
-    NULL;
-  END;
-END $$;
+-- Asegurar rol de administrador titular para los 3 correos
+UPDATE public.profiles 
+SET role = 'firm' 
+WHERE LOWER(email) IN ('eldavidprz@gmail.com', 'marlon.jimenez@jalegal.com.co', 'sebastian.ariza@jalegal.com.co');
 
--- 11. BUCKET DE SUPABASE STORAGE Y POLÍTICAS PÚBLICAS PARA DOCUMENTOS
+-- 11. BUCKET DE SUPABASE STORAGE Y POLÍTICAS PÚBLICAS PARA DOCUMENTOS DIGITALES
 DO $$
 BEGIN
   -- Insertar bucket 'case-documents' si el esquema storage existe
@@ -1688,7 +2033,7 @@ BEGIN
       NULL;
     END;
 
-    -- Políticas permisivas de lectura y subida para el bucket case-documents
+    -- Políticas permisivas de lectura, subida, edición y eliminación para el bucket case-documents
     BEGIN
       DROP POLICY IF EXISTS "Lectura pública de case-documents" ON storage.objects;
       CREATE POLICY "Lectura pública de case-documents" ON storage.objects
@@ -1701,6 +2046,22 @@ BEGIN
       DROP POLICY IF EXISTS "Subida pública de case-documents" ON storage.objects;
       CREATE POLICY "Subida pública de case-documents" ON storage.objects
         FOR INSERT WITH CHECK (bucket_id = 'case-documents');
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+
+    BEGIN
+      DROP POLICY IF EXISTS "Actualización de case-documents" ON storage.objects;
+      CREATE POLICY "Actualización de case-documents" ON storage.objects
+        FOR UPDATE USING (bucket_id = 'case-documents');
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+
+    BEGIN
+      DROP POLICY IF EXISTS "Eliminación de case-documents" ON storage.objects;
+      CREATE POLICY "Eliminación de case-documents" ON storage.objects
+        FOR DELETE USING (bucket_id = 'case-documents');
     EXCEPTION WHEN OTHERS THEN
       NULL;
     END;
