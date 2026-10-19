@@ -204,6 +204,54 @@ body.theme-light {
   gap: 16px;
 }
 
+.client-case-switcher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+  padding: 14px 18px;
+  border: 1px solid rgba(217, 181, 106, 0.55);
+  border-left: 4px solid var(--brass);
+  border-radius: 8px;
+  background: var(--ink-panel);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
+.client-case-switcher-copy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--brass-light);
+  font-size: 1.15rem;
+}
+
+.client-case-switcher-copy strong,
+.client-case-switcher-copy small { display: block; }
+.client-case-switcher-copy small { margin-top: 3px; color: var(--text-muted); font-size: 0.78rem; }
+
+.client-case-switcher-control {
+  display: grid;
+  flex: 1;
+  max-width: 620px;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.client-case-switcher-control select {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--parchment-deep);
+  color: var(--text-bright);
+  font: inherit;
+  font-size: 0.84rem;
+}
+
 .kicker {
   font-family: var(--font-sans);
   font-size: 0.72rem;
@@ -800,6 +848,8 @@ body.theme-light {
   .portal-stat-card strong { font-size: 1.12rem; }
   .portal-stat-card strong.portal-stat-status,
   .portal-stat-card strong.portal-stat-date { font-size: 0.82rem; }
+  .client-case-switcher { align-items: stretch; flex-direction: column; gap: 12px; padding: 13px; }
+  .client-case-switcher-control { max-width: none; }
   .login-view { padding: 24px 14px !important; }
   .login-toolbar { top: 14px; left: 14px; right: 14px; }
   .login-card { padding: 24px 20px !important; }

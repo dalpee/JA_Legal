@@ -315,13 +315,13 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
         setAgenda(agendaRes.data && agendaRes.data.length > 0 ? agendaRes.data : (activeCase ? getStoredAgenda().filter((item) => item.case_id === activeCase.id) : []));
         setHistory(historyRes.data && historyRes.data.length > 0 ? historyRes.data : (activeCase ? getStoredHistory().filter((item) => item.case_id === activeCase.id) : []));
         setDocuments(docsRes.data && docsRes.data.length > 0 ? docsRes.data : (activeCase ? getStoredDocuments().filter((item) => item.case_id === activeCase.id) : []));
-        setFinances(finRes.data && finRes.data.length > 0
-          ? finRes.data
-          : userRole === "firm"
-            ? getStoredFinances()
-            : activeCase
-              ? getStoredFinances().filter((item) => item.case_id === activeCase.id || item.client_id === activeProfile.id)
-              : []);
+        const storedFinances = getStoredFinances();
+        const fetchedFinances = finRes.data && finRes.data.length > 0 ? finRes.data : storedFinances;
+        setFinances(userRole === "firm"
+          ? fetchedFinances
+          : activeCase
+            ? fetchedFinances.filter((item) => item.case_id === activeCase.id || (!item.case_id && item.client_id === activeProfile.id))
+            : []);
         setLoadingData(false);
       }
     })();
@@ -659,14 +659,21 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     setCaseRecord(selected);
     setLoadingData(true);
     try {
-      const [agendaRes, historyRes, caseDocuments] = await Promise.all([
+      const financeQuery = profile?.role === "firm"
+        ? supabase.from("financial_records").select("*")
+        : supabase.from("financial_records").select("*").eq("case_id", selected.id);
+      const [agendaRes, historyRes, caseDocuments, financeRes] = await Promise.all([
         supabase.from("agenda_items").select("*").eq("case_id", selected.id).order("event_date", { ascending: true }),
         supabase.from("history_items").select("*").eq("case_id", selected.id).order("event_date", { ascending: false }),
         fetchDocumentsForCaseFromDatabase(selected.id),
+        financeQuery,
       ]);
       setAgenda(agendaRes.data ?? getStoredAgenda().filter((item) => item.case_id === selected.id));
       setHistory(historyRes.data ?? getStoredHistory().filter((item) => item.case_id === selected.id));
       setDocuments(caseDocuments.filter((doc) => doc.case_id === selected.id));
+      setFinances(financeRes.data ?? (profile?.role === "firm"
+        ? getStoredFinances()
+        : getStoredFinances().filter((item) => item.case_id === selected.id)));
     } catch (error) {
       console.error("No se pudieron cargar los datos del expediente seleccionado", error);
       setDocuments(getStoredDocuments().filter((doc) => doc.case_id === selected.id));
@@ -1279,6 +1286,34 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                         🗑️
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {!isFirm && allCases.length > 1 && (
+                  <div className="client-case-switcher">
+                    <div className="client-case-switcher-copy">
+                      <span aria-hidden="true">📁</span>
+                      <div>
+                        <strong>Mis casos ({allCases.length})</strong>
+                        <small>Selecciona el expediente que quieres consultar.</small>
+                      </div>
+                    </div>
+                    <label className="client-case-switcher-control">
+                      <span>Expediente</span>
+                      <select
+                        value={caseRecord.id}
+                        onChange={(event) => {
+                          const selected = allCases.find((item) => item.id === event.target.value);
+                          if (selected) void handleSelectCase(selected);
+                        }}
+                      >
+                        {allCases.map((item, index) => (
+                          <option key={item.id} value={item.id}>
+                            {index + 1}. {item.title} — {item.radicado || item.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 )}
 
