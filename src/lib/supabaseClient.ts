@@ -1764,6 +1764,29 @@ export function getRealSupabaseClient() {
   return realSupabaseClientInstance;
 }
 
+// Actualiza la contraseña de otra cuenta mediante la función segura de Vercel.
+// La clave administrativa de Supabase nunca se expone al navegador.
+export async function resetManagedUserPassword(userId: string, newPassword: string): Promise<void> {
+  const client = getRealSupabaseClient();
+  const { data: { session }, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !session?.access_token) {
+    throw new Error("Inicia sesión de nuevo para poder cambiar la contraseña.");
+  }
+
+  const response = await fetch("/api/admin-reset-user-password", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ userId, password: newPassword }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result?.error || "No se pudo actualizar la contraseña.");
+  }
+}
+
 // Prueba en tiempo real la conexión con Supabase
 export async function testSupabaseConnection(url?: string, anonKey?: string): Promise<{ success: boolean; message: string }> {
   try {

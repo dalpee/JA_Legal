@@ -8,6 +8,7 @@ import {
   canCreateAccounts,
   createUserAccount,
   updateUserProfile,
+  resetManagedUserPassword,
   deleteUserAccount,
   getSupabaseConfig,
   saveSupabaseConfig,
@@ -55,12 +56,14 @@ export function AdminDashboard({
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
-  const [visiblePasswordUsers, setVisiblePasswordUsers] = useState<Record<string, boolean>>({});
   const [editingUser, setEditingUser] = useState<StoredUser | null>(null);
   const [editProfile, setEditProfile] = useState({ username: "", full_name: "", role: "client" as "client" | "firm", id_number: "", phone: "" });
   const [editProfileError, setEditProfileError] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [showEditPassword, setShowEditPassword] = useState(false);
+  const [editNewPassword, setEditNewPassword] = useState("");
+  const [editPasswordUpdated, setEditPasswordUpdated] = useState(false);
+  const [copiedNewCredentials, setCopiedNewCredentials] = useState(false);
 
   // Validación estricta: solo Super Admin y los 2 Administradores de la firma pueden crear cuentas
   const userCanCreate = canCreateAccounts(currentUser);
@@ -305,7 +308,10 @@ export function AdminDashboard({
       phone: user.phone || "",
     });
     setEditProfileError("");
+    setEditNewPassword("");
     setShowEditPassword(false);
+    setEditPasswordUpdated(false);
+    setCopiedNewCredentials(false);
   };
 
   const handleSaveUserProfile = async (event: React.FormEvent) => {
@@ -318,6 +324,10 @@ export function AdminDashboard({
     }
     if (!editProfile.full_name.trim()) {
       setEditProfileError("El nombre completo es obligatorio.");
+      return;
+    }
+    if (editNewPassword && editNewPassword.length < 8) {
+      setEditProfileError("La nueva contraseña debe tener al menos 8 caracteres.");
       return;
     }
     const duplicateUsername = registeredUsers.some((user) =>
@@ -339,6 +349,13 @@ export function AdminDashboard({
         id_number: editProfile.id_number.trim(),
         phone: editProfile.phone.trim(),
       });
+      if (editNewPassword && !editPasswordUpdated) {
+        await resetManagedUserPassword(editingUser.id, editNewPassword);
+        setEditPasswordUpdated(true);
+        setCopiedNewCredentials(false);
+        if (onRefreshUsers) onRefreshUsers();
+        return;
+      }
       if (onRefreshUsers) onRefreshUsers();
       setEditingUser(null);
     } catch (error: any) {
@@ -1462,26 +1479,9 @@ export function AdminDashboard({
                       Usuario de ingreso: <strong style={{ color: "var(--text-bright)" }}>{u.username || u.email.split("@")[0]}</strong>
                     </p>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 10px", fontSize: "0.78rem" }}>
-                      <span style={{ color: "var(--text-muted)" }}>Contraseña:</span>
-                      {u.password ? (
-                        <>
-                          <code style={{ color: "var(--text-bright)" }}>
-                            {visiblePasswordUsers[u.id] ? u.password : "••••••••"}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => setVisiblePasswordUsers((current) => ({ ...current, [u.id]: !current[u.id] }))}
-                            aria-label={visiblePasswordUsers[u.id] ? `Ocultar contraseña de ${u.full_name}` : `Mostrar contraseña de ${u.full_name}`}
-                            style={{ background: "transparent", border: "none", color: "var(--brass-light)", cursor: "pointer", padding: "2px 4px" }}
-                          >
-                            {visiblePasswordUsers[u.id] ? "🙈 Ocultar" : "👁️ Ver"}
-                          </button>
-                        </>
-                      ) : (
-                        <span style={{ color: "var(--text-muted)" }}>No disponible para consultar</span>
-                      )}
-                    </div>
+                    <p style={{ margin: "0 0 10px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                      Contraseña: no se puede consultar. Para asignar una nueva, usa <strong>Editar perfil</strong>.
+                    </p>
 
                     {u.id_number && (
                       <p style={{ margin: "0 0 6px", fontSize: "0.74rem", color: "var(--text)" }}>
@@ -1642,12 +1642,14 @@ export function AdminDashboard({
               <ol style={{ margin: "6px 0 0", paddingLeft: "18px", fontSize: "0.78rem" }}>
                 <li>Abre tu proyecto en <strong><a href="https://vercel.com/dashboard" target="_blank" rel="noreferrer" style={{ color: "#38bdf8" }}>https://vercel.com/dashboard</a></strong>.</li>
                 <li>Ve a <strong>Settings → Environment Variables</strong>.</li>
-                <li>Agrega dos variables:
+                <li>Agrega estas tres variables:
                   <ul style={{ marginTop: "3px" }}>
                     <li><code>VITE_SUPABASE_URL</code> con el valor de tu Project URL.</li>
                     <li><code>VITE_SUPABASE_ANON_KEY</code> con el valor de tu Project API Key (anon/public).</li>
+                    <li><code>SUPABASE_SERVICE_ROLE_KEY</code> con la clave secreta de Supabase, solo para permitir que los administradores asignen nuevas contraseñas.</li>
                   </ul>
                 </li>
+                <li>La clave secreta no debe llevar el prefijo <code>VITE_</code>; Vercel la usa únicamente en su API privada y nunca se muestra al navegador.</li>
                 <li>Ve a la pestaña <strong>Deployments</strong>, haz clic en los tres puntos (…) de tu último despliegue y selecciona <strong>Redeploy</strong>.</li>
               </ol>
             </div>
@@ -2136,20 +2138,41 @@ export function AdminDashboard({
             </div>
 
             <div style={{ background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "5px", padding: "11px 12px" }}>
-              <div style={{ color: "var(--text-bright)", fontSize: "0.78rem", marginBottom: "5px" }}>Contraseña</div>
-              {editingUser.password ? (
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <code style={{ color: "var(--brass-light)" }}>{showEditPassword ? editingUser.password : "••••••••"}</code>
-                  <button type="button" onClick={() => setShowEditPassword((visible) => !visible)} style={{ background: "transparent", border: "none", color: "var(--brass-light)", cursor: "pointer" }}>{showEditPassword ? "🙈 Ocultar" : "👁️ Ver contraseña"}</button>
+              <label style={{ display: "flex", flexDirection: "column", gap: "7px", color: "var(--text-bright)", fontSize: "0.78rem" }}>
+                Asignar nueva contraseña (opcional)
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <input
+                    type={showEditPassword ? "text" : "password"}
+                    value={editNewPassword}
+                    onChange={(event) => { setEditNewPassword(event.target.value); setEditPasswordUpdated(false); }}
+                    autoComplete="new-password"
+                    minLength={8}
+                    placeholder="Mínimo 8 caracteres"
+                    disabled={editPasswordUpdated}
+                    style={{ flex: 1, minWidth: 0, padding: "9px 10px", background: "var(--ink-soft)", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px" }}
+                  />
+                  <button type="button" onClick={() => setShowEditPassword((visible) => !visible)} aria-label={showEditPassword ? "Ocultar nueva contraseña" : "Mostrar nueva contraseña"} style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--text-bright)", borderRadius: "4px", padding: "0 10px", cursor: "pointer" }}>{showEditPassword ? "Ocultar" : "Ver"}</button>
                 </div>
-              ) : (
-                <small style={{ color: "var(--text-muted)" }}>Supabase no permite consultar la contraseña actual. Para cambiarla, restablécela desde Authentication → Users en Supabase.</small>
+                <small style={{ color: "var(--text-muted)" }}>La contraseña actual no se puede recuperar. Escribe una nueva solo si quieres reemplazarla.</small>
+              </label>
+              {editPasswordUpdated && (
+                <div role="status" style={{ marginTop: "9px", color: "#4ade80", fontSize: "0.8rem" }}>
+                  <p style={{ margin: "0 0 8px" }}>Nueva contraseña guardada. Compártela ahora con el usuario; solo se mostrará aquí hasta cerrar este editor.</p>
+                  <button type="button" onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(`Usuario: ${editProfile.username}\nContraseña: ${editNewPassword}`);
+                      setCopiedNewCredentials(true);
+                    } catch {
+                      setEditProfileError("No se pudo copiar el acceso. Selecciona el usuario y la contraseña para copiarlos manualmente.");
+                    }
+                  }} style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--text-bright)", padding: "6px 10px", borderRadius: "4px", cursor: "pointer" }}>{copiedNewCredentials ? "Acceso copiado" : "Copiar usuario y contraseña"}</button>
+                </div>
               )}
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", paddingTop: "6px" }}>
-              <button type="button" onClick={() => setEditingUser(null)} style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--text-bright)", padding: "9px 14px", borderRadius: "4px", cursor: "pointer" }}>Cancelar</button>
-              <button type="submit" disabled={savingProfile} style={{ background: "var(--brass)", border: "none", color: "var(--ink)", fontWeight: 700, padding: "9px 18px", borderRadius: "4px", cursor: "pointer" }}>{savingProfile ? "Guardando…" : "Guardar perfil"}</button>
+              <button type="button" onClick={() => setEditingUser(null)} style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--text-bright)", padding: "9px 14px", borderRadius: "4px", cursor: "pointer" }}>{editPasswordUpdated ? "Cerrar" : "Cancelar"}</button>
+              <button type="submit" disabled={savingProfile || editPasswordUpdated} style={{ background: "var(--brass)", border: "none", color: "var(--ink)", fontWeight: 700, padding: "9px 18px", borderRadius: "4px", cursor: "pointer" }}>{savingProfile ? "Guardando…" : editNewPassword && !editPasswordUpdated ? "Guardar perfil y contraseña" : "Guardar perfil"}</button>
             </div>
           </form>
         </div>
