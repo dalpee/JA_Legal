@@ -1,0 +1,1284 @@
+{
+ "url": "http://localhost:3001/#portal",
+ "at": "2026-10-19T03:40:29.451Z",
+ "allow": [],
+ "viewports": [
+  {
+   "width": 1440,
+   "height": 900,
+   "load": "load",
+   "screens": 1,
+   "filled": [
+    0.26
+   ],
+   "motion": {
+    "elements": 3,
+    "css": 1,
+    "transitions": 2,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "page": {
+     "height": 900,
+     "screens": 1,
+     "words": 41,
+     "img": 1,
+     "video": 0,
+     "canvas": 0,
+     "svg": 1,
+     "sections": 1,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 0,
+     "uiAbuse": false,
+     "realPictures": 1,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [
+      "ja-legal-login-logo.png"
+     ],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "Portal de Clientes & Despacho",
+     "words": 5,
+     "chars": 29,
+     "lines": 2,
+     "size": 34,
+     "vw": 2.4,
+     "font": "Source Serif 4",
+     "weight": 600,
+     "tracking": -0.04,
+     "leading": 1.2,
+     "top": 333,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": {
+     "text": "Portal de Clientes & Despacho",
+     "words": 5,
+     "lines": 2,
+     "size": 34.4,
+     "font": "Source Serif 4"
+    },
+    "headings": [
+     {
+      "text": "Portal de Clientes & Despacho",
+      "words": 5,
+      "chars": 29,
+      "lines": 2,
+      "size": 34.4,
+      "vw": 2.4,
+      "font": "Source Serif 4",
+      "weight": 600,
+      "tracking": -0.035,
+      "leading": 1.2,
+      "upper": false,
+      "italic": false,
+      "mono": false,
+      "align": "left",
+      "position": "right",
+      "widthRatio": 0.26,
+      "top": 333,
+      "tag": "h1",
+      "kind": "heading"
+     }
+    ],
+    "headingSummary": {
+     "count": 1,
+     "maxLines": 2,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "Inter",
+       "share": 0.74,
+       "mono": false
+      },
+      {
+       "family": "Arial",
+       "share": 0.13,
+       "mono": false
+      },
+      {
+       "family": "Source Serif 4",
+       "share": 0.12,
+       "mono": false
+      }
+     ],
+     "familyCount": 3,
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      34
+     ],
+     "sizeCount": 5,
+     "notLoaded": [],
+     "body": {
+      "font": "Inter",
+      "size": 14.1,
+      "leading": 1.5,
+      "weight": 400,
+      "tracking": 0,
+      "contrast": 6.8
+     },
+     "measureChars": 54,
+     "max": {
+      "size": 34.4,
+      "vw": 2.4,
+      "font": "Source Serif 4",
+      "text": "Portal de Clientes & Despacho"
+     },
+     "monoShare": 0,
+     "monoProseShare": 0,
+     "monoFamilies": [],
+     "monoSamples": [],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0,
+     "centerShare": 0.44,
+     "smallText": 3
+    },
+    "eyebrows": [
+     {
+      "text": "Acceso seguro al portal",
+      "above": "Portal de Clientes & Despacho",
+      "upper": false,
+      "tracked": true,
+      "mono": false,
+      "pill": false,
+      "size": 12.5,
+      "top": 302
+     }
+    ],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#0c1526",
+     "bodyBgHsl": {
+      "h": 219,
+      "s": 0.52,
+      "l": 0.1
+     },
+     "dark": true,
+     "sectionBgs": [
+      {
+       "color": "#0c1526",
+       "top": 0,
+       "hsl": {
+        "h": 219,
+        "s": 0.52,
+        "l": 0.1
+       }
+      }
+     ],
+     "textColors": [
+      {
+       "color": "#9eabbd",
+       "share": 0.26
+      },
+      {
+       "color": "#a1adbd",
+       "share": 0.19
+      },
+      {
+       "color": "#9aa6b8",
+       "share": 0.13
+      },
+      {
+       "color": "#f4f1e8",
+       "share": 0.12
+      },
+      {
+       "color": "#d9b56a",
+       "share": 0.1
+      }
+     ],
+     "button": {
+      "bg": "#d9b56a",
+      "hsl": {
+       "h": 41,
+       "s": 0.59,
+       "l": 0.63
+      },
+      "fg": "#0c1526"
+     },
+     "lowContrast": []
+    },
+    "buttons": {
+     "count": 1,
+     "inHero": 1,
+     "radius": 6,
+     "height": 48,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "Iniciar sesión"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 2,
+     "shadowOverlay": 0,
+     "shadowSamples": [
+      "section.portal-card.login-card → rgba(0, 0, 0, 0.4) 0px 30px 80px 0px",
+      "input → rgba(217, 181, 106, 0.14) 0px 0px 0px 3px"
+     ],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 2,
+     "hairlineSamples": [
+      "section.portal-card.login-card 460px",
+      "div 378px"
+     ],
+     "outlinedBoxes": 0,
+     "dashed": 0,
+     "blurred": 0,
+     "roundedBoxes": 1,
+     "boxRadius": 10,
+     "squareMedia": 1,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": []
+    },
+    "heroMedia": [],
+    "nav": null,
+    "fontsLoaded": [
+     "inter",
+     "source serif 4"
+    ]
+   },
+   "layout": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "pageH": 900,
+    "margins": {
+     "left": 64,
+     "right": 251
+    },
+    "sections": [],
+    "gaps": [],
+    "h1s": [
+     {
+      "text": "Portal de Clientes & Despacho",
+      "size": 34,
+      "top": 333,
+      "firstScreen": true
+     }
+    ],
+    "edgeText": [],
+    "edges": [
+     {
+      "x": 811,
+      "n": 2
+     }
+    ],
+    "leftBlocks": 2,
+    "bodySize": 14,
+    "stage": false,
+    "explains": false,
+    "slivers": [],
+    "voidShare": 0.47,
+    "voidBox": {
+     "x": 0,
+     "y": 120,
+     "w": 780,
+     "h": 780
+    }
+   },
+   "app": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "dark": true,
+    "ground": "#0c1526",
+    "sidebar": null,
+    "topbar": null,
+    "canvas": {
+     "left": 58,
+     "right": 251
+    },
+    "hero": {
+     "text": "Portal de Clientes & Despacho",
+     "words": 5,
+     "chars": 29,
+     "lines": 2,
+     "size": 34,
+     "vw": 2.4,
+     "font": "Source Serif 4",
+     "weight": 600,
+     "tracking": -0.04,
+     "leading": 1.2,
+     "top": 333,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 0,
+    "layout": {
+     "panels": 1,
+     "firstScreen": 1,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 1,
+     "radii": [
+      [
+       10,
+       1
+      ]
+     ],
+     "heavyBorders": 1,
+     "borderSamples": [
+      "#d9b56a on #16223b (8.12:1)"
+     ],
+     "heavyShadows": 0,
+     "softShadows": 1,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 0,
+     "hues": 0,
+     "samples": []
+    },
+    "numbers": {
+     "cells": 0,
+     "leftAligned": 0,
+     "figures": 0,
+     "tabularShare": null,
+     "kpiMax": null
+    },
+    "rows": null,
+    "chartHues": 0,
+    "placeholders": [],
+    "type": {
+     "under13": 0.34,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      34
+     ]
+    },
+    "title": {
+     "text": "Portal de Clientes & Despacho",
+     "size": 34,
+     "top": 333
+    },
+    "colourShare": 0.012
+   },
+   "consoleErrors": []
+  },
+  {
+   "width": 768,
+   "height": 1024,
+   "load": "load",
+   "screens": 1,
+   "filled": [
+    0.41
+   ],
+   "motion": {
+    "elements": 3,
+    "css": 1,
+    "transitions": 2,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "page": {
+     "height": 1024,
+     "screens": 1,
+     "words": 41,
+     "img": 1,
+     "video": 0,
+     "canvas": 0,
+     "svg": 1,
+     "sections": 1,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 0,
+     "uiAbuse": false,
+     "realPictures": 1,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [
+      "ja-legal-login-logo.png"
+     ],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "Portal de Clientes & Despacho",
+     "words": 5,
+     "chars": 29,
+     "lines": 1,
+     "size": 27,
+     "vw": 3.5,
+     "font": "Source Serif 4",
+     "weight": 600,
+     "tracking": -0.03,
+     "leading": 1.2,
+     "top": 449,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": {
+     "text": "Portal de Clientes & Despacho",
+     "words": 5,
+     "lines": 1,
+     "size": 27.2,
+     "font": "Source Serif 4"
+    },
+    "headings": [
+     {
+      "text": "Portal de Clientes & Despacho",
+      "words": 5,
+      "chars": 29,
+      "lines": 1,
+      "size": 27.2,
+      "vw": 3.5,
+      "font": "Source Serif 4",
+      "weight": 600,
+      "tracking": -0.035,
+      "leading": 1.2,
+      "upper": false,
+      "italic": false,
+      "mono": false,
+      "align": "left",
+      "position": "center",
+      "widthRatio": 0.49,
+      "top": 449,
+      "tag": "h1",
+      "kind": "heading"
+     }
+    ],
+    "headingSummary": {
+     "count": 1,
+     "maxLines": 1,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "Inter",
+       "share": 0.74,
+       "mono": false
+      },
+      {
+       "family": "Arial",
+       "share": 0.13,
+       "mono": false
+      },
+      {
+       "family": "Source Serif 4",
+       "share": 0.12,
+       "mono": false
+      }
+     ],
+     "familyCount": 3,
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      27
+     ],
+     "sizeCount": 5,
+     "notLoaded": [],
+     "body": {
+      "font": "Inter",
+      "size": 14.1,
+      "leading": 1.5,
+      "weight": 400,
+      "tracking": 0,
+      "contrast": 6.8
+     },
+     "measureChars": 54,
+     "max": {
+      "size": 27.2,
+      "vw": 3.5,
+      "font": "Source Serif 4",
+      "text": "Portal de Clientes & Despacho"
+     },
+     "monoShare": 0,
+     "monoProseShare": 0,
+     "monoFamilies": [],
+     "monoSamples": [],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0,
+     "centerShare": 0.44,
+     "smallText": 3
+    },
+    "eyebrows": [
+     {
+      "text": "Acceso seguro al portal",
+      "above": "Portal de Clientes & Despacho",
+      "upper": false,
+      "tracked": true,
+      "mono": false,
+      "pill": false,
+      "size": 12.5,
+      "top": 418
+     }
+    ],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#0c1526",
+     "bodyBgHsl": {
+      "h": 219,
+      "s": 0.52,
+      "l": 0.1
+     },
+     "dark": true,
+     "sectionBgs": [
+      {
+       "color": "#0c1526",
+       "top": 0,
+       "hsl": {
+        "h": 219,
+        "s": 0.52,
+        "l": 0.1
+       }
+      },
+      {
+       "color": "#16223b",
+       "top": 185,
+       "hsl": {
+        "h": 221,
+        "s": 0.46,
+        "l": 0.16
+       }
+      }
+     ],
+     "textColors": [
+      {
+       "color": "#9eabbd",
+       "share": 0.26
+      },
+      {
+       "color": "#a1adbd",
+       "share": 0.19
+      },
+      {
+       "color": "#9aa6b8",
+       "share": 0.13
+      },
+      {
+       "color": "#f4f1e8",
+       "share": 0.12
+      },
+      {
+       "color": "#d9b56a",
+       "share": 0.1
+      }
+     ],
+     "button": {
+      "bg": "#d9b56a",
+      "hsl": {
+       "h": 41,
+       "s": 0.59,
+       "l": 0.63
+      },
+      "fg": "#0c1526"
+     },
+     "lowContrast": []
+    },
+    "buttons": {
+     "count": 1,
+     "inHero": 1,
+     "radius": 6,
+     "height": 48,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "Iniciar sesión"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 2,
+     "shadowOverlay": 0,
+     "shadowSamples": [
+      "section.portal-card.login-card → rgba(0, 0, 0, 0.4) 0px 30px 80px 0px",
+      "input → rgba(217, 181, 106, 0.14) 0px 0px 0px 3px"
+     ],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 2,
+     "hairlineSamples": [
+      "section.portal-card.login-card 460px",
+      "div 378px"
+     ],
+     "outlinedBoxes": 0,
+     "dashed": 0,
+     "blurred": 0,
+     "roundedBoxes": 1,
+     "boxRadius": 10,
+     "squareMedia": 1,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": []
+    },
+    "heroMedia": [],
+    "nav": null,
+    "fontsLoaded": [
+     "inter",
+     "source serif 4"
+    ]
+   },
+   "layout": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "pageH": 1024,
+    "margins": {
+     "left": 37,
+     "right": 195
+    },
+    "sections": [],
+    "gaps": [],
+    "h1s": [
+     {
+      "text": "Portal de Clientes & Despacho",
+      "size": 27,
+      "top": 449,
+      "firstScreen": true
+     }
+    ],
+    "edgeText": [],
+    "edges": [
+     {
+      "x": 195,
+      "n": 2
+     }
+    ],
+    "leftBlocks": 2,
+    "bodySize": 14,
+    "stage": false,
+    "explains": false,
+    "slivers": [],
+    "voidShare": 0,
+    "voidBox": null
+   },
+   "app": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "dark": true,
+    "ground": "#0c1526",
+    "sidebar": null,
+    "topbar": null,
+    "canvas": {
+     "left": 31,
+     "right": 195
+    },
+    "hero": {
+     "text": "Portal de Clientes & Despacho",
+     "words": 5,
+     "chars": 29,
+     "lines": 1,
+     "size": 27,
+     "vw": 3.5,
+     "font": "Source Serif 4",
+     "weight": 600,
+     "tracking": -0.03,
+     "leading": 1.2,
+     "top": 449,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 0,
+    "layout": {
+     "panels": 1,
+     "firstScreen": 1,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 1,
+     "radii": [
+      [
+       10,
+       1
+      ]
+     ],
+     "heavyBorders": 1,
+     "borderSamples": [
+      "#d9b56a on #16223b (8.12:1)"
+     ],
+     "heavyShadows": 0,
+     "softShadows": 1,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 0,
+     "hues": 0,
+     "samples": []
+    },
+    "numbers": {
+     "cells": 0,
+     "leftAligned": 0,
+     "figures": 0,
+     "tabularShare": null,
+     "kpiMax": null
+    },
+    "rows": null,
+    "chartHues": 0,
+    "placeholders": [],
+    "type": {
+     "under13": 0.34,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      27
+     ]
+    },
+    "title": {
+     "text": "Portal de Clientes & Despacho",
+     "size": 27,
+     "top": 449
+    },
+    "colourShare": 0.026
+   },
+   "consoleErrors": []
+  },
+  {
+   "width": 390,
+   "height": 844,
+   "load": "load",
+   "screens": 1,
+   "filled": [
+    0.83
+   ],
+   "motion": {
+    "elements": 3,
+    "css": 1,
+    "transitions": 2,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 390,
+     "h": 844
+    },
+    "page": {
+     "height": 844,
+     "screens": 1,
+     "words": 41,
+     "img": 1,
+     "video": 0,
+     "canvas": 0,
+     "svg": 1,
+     "sections": 1,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 0,
+     "uiAbuse": false,
+     "realPictures": 1,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [
+      "ja-legal-login-logo.png"
+     ],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "Portal de Clientes & Despacho",
+     "words": 5,
+     "chars": 29,
+     "lines": 2,
+     "size": 27,
+     "vw": 7,
+     "font": "Source Serif 4",
+     "weight": 600,
+     "tracking": -0.03,
+     "leading": 1.2,
+     "top": 300,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": {
+     "text": "Portal de Clientes & Despacho",
+     "words": 5,
+     "lines": 2,
+     "size": 27.2,
+     "font": "Source Serif 4"
+    },
+    "headings": [
+     {
+      "text": "Portal de Clientes & Despacho",
+      "words": 5,
+      "chars": 29,
+      "lines": 2,
+      "size": 27.2,
+      "vw": 7,
+      "font": "Source Serif 4",
+      "weight": 600,
+      "tracking": -0.035,
+      "leading": 1.2,
+      "upper": false,
+      "italic": false,
+      "mono": false,
+      "align": "left",
+      "position": "center",
+      "widthRatio": 0.81,
+      "top": 300,
+      "tag": "h1",
+      "kind": "heading"
+     }
+    ],
+    "headingSummary": {
+     "count": 1,
+     "maxLines": 2,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "Inter",
+       "share": 0.74,
+       "mono": false
+      },
+      {
+       "family": "Arial",
+       "share": 0.13,
+       "mono": false
+      },
+      {
+       "family": "Source Serif 4",
+       "share": 0.12,
+       "mono": false
+      }
+     ],
+     "familyCount": 3,
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      27
+     ],
+     "sizeCount": 5,
+     "notLoaded": [],
+     "body": {
+      "font": "Inter",
+      "size": 14.1,
+      "leading": 1.5,
+      "weight": 400,
+      "tracking": 0,
+      "contrast": 6.8
+     },
+     "measureChars": 45,
+     "max": {
+      "size": 27.2,
+      "vw": 7,
+      "font": "Source Serif 4",
+      "text": "Portal de Clientes & Despacho"
+     },
+     "monoShare": 0,
+     "monoProseShare": 0,
+     "monoFamilies": [],
+     "monoSamples": [],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0,
+     "centerShare": 0.44,
+     "smallText": 3
+    },
+    "eyebrows": [
+     {
+      "text": "Acceso seguro al portal",
+      "above": "Portal de Clientes & Despacho",
+      "upper": false,
+      "tracked": true,
+      "mono": false,
+      "pill": false,
+      "size": 12.5,
+      "top": 269
+     }
+    ],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#0c1526",
+     "bodyBgHsl": {
+      "h": 219,
+      "s": 0.52,
+      "l": 0.1
+     },
+     "dark": true,
+     "sectionBgs": [
+      {
+       "color": "#0c1526",
+       "top": 0,
+       "hsl": {
+        "h": 219,
+        "s": 0.52,
+        "l": 0.1
+       }
+      },
+      {
+       "color": "#16223b",
+       "top": 75,
+       "hsl": {
+        "h": 221,
+        "s": 0.46,
+        "l": 0.16
+       }
+      }
+     ],
+     "textColors": [
+      {
+       "color": "#9eabbd",
+       "share": 0.26
+      },
+      {
+       "color": "#a1adbd",
+       "share": 0.19
+      },
+      {
+       "color": "#9aa6b8",
+       "share": 0.13
+      },
+      {
+       "color": "#f4f1e8",
+       "share": 0.12
+      },
+      {
+       "color": "#d9b56a",
+       "share": 0.1
+      }
+     ],
+     "button": {
+      "bg": "#d9b56a",
+      "hsl": {
+       "h": 41,
+       "s": 0.59,
+       "l": 0.63
+      },
+      "fg": "#0c1526"
+     },
+     "lowContrast": []
+    },
+    "buttons": {
+     "count": 1,
+     "inHero": 1,
+     "radius": 6,
+     "height": 48,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "Iniciar sesión"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 2,
+     "shadowOverlay": 0,
+     "shadowSamples": [
+      "section.portal-card.login-card → rgba(0, 0, 0, 0.4) 0px 30px 80px 0px",
+      "input → rgba(217, 181, 106, 0.14) 0px 0px 0px 3px"
+     ],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 2,
+     "hairlineSamples": [
+      "section.portal-card.login-card 362px",
+      "div 316px"
+     ],
+     "outlinedBoxes": 0,
+     "dashed": 0,
+     "blurred": 0,
+     "roundedBoxes": 1,
+     "boxRadius": 10,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": []
+    },
+    "heroMedia": [
+     {
+      "type": "img",
+      "ratio": 0.08
+     }
+    ],
+    "nav": null,
+    "fontsLoaded": [
+     "inter",
+     "source serif 4"
+    ]
+   },
+   "layout": {
+    "viewport": {
+     "w": 390,
+     "h": 844
+    },
+    "pageH": 844,
+    "margins": {
+     "left": 26,
+     "right": 37
+    },
+    "sections": [],
+    "gaps": [],
+    "h1s": [
+     {
+      "text": "Portal de Clientes & Despacho",
+      "size": 27,
+      "top": 300,
+      "firstScreen": true
+     }
+    ],
+    "edgeText": [],
+    "edges": [
+     {
+      "x": 37,
+      "n": 2
+     }
+    ],
+    "leftBlocks": 2,
+    "bodySize": 14,
+    "stage": false,
+    "explains": false,
+    "slivers": [],
+    "voidShare": 0,
+    "voidBox": null
+   },
+   "app": {
+    "viewport": {
+     "w": 390,
+     "h": 844
+    },
+    "dark": true,
+    "ground": "#0c1526",
+    "sidebar": null,
+    "topbar": null,
+    "canvas": {
+     "left": 20,
+     "right": 37
+    },
+    "hero": {
+     "text": "Portal de Clientes & Despacho",
+     "words": 5,
+     "chars": 29,
+     "lines": 2,
+     "size": 27,
+     "vw": 7,
+     "font": "Source Serif 4",
+     "weight": 600,
+     "tracking": -0.03,
+     "leading": 1.2,
+     "top": 300,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 0,
+    "layout": {
+     "panels": 1,
+     "firstScreen": 1,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 1,
+     "radii": [
+      [
+       10,
+       1
+      ]
+     ],
+     "heavyBorders": 1,
+     "borderSamples": [
+      "#d9b56a on #16223b (8.12:1)"
+     ],
+     "heavyShadows": 0,
+     "softShadows": 1,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 0,
+     "hues": 0,
+     "samples": []
+    },
+    "numbers": {
+     "cells": 0,
+     "leftAligned": 0,
+     "figures": 0,
+     "tabularShare": null,
+     "kpiMax": null
+    },
+    "rows": null,
+    "chartHues": 0,
+    "placeholders": [],
+    "type": {
+     "under13": 0.34,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      27
+     ]
+    },
+    "title": {
+     "text": "Portal de Clientes & Despacho",
+     "size": 27,
+     "top": 300
+    },
+    "colourShare": 0.047
+   },
+   "consoleErrors": []
+  }
+ ],
+ "findings": [
+  {
+   "level": "WARN",
+   "id": "palette-cream",
+   "width": 1440,
+   "message": "Yellow-cream background (text #f4f1e8).",
+   "fix": "Use the drawn palette. If you want warmth, take a low-chroma stone or bone, not a yellow cream.",
+   "alsoAt": [
+    768,
+    390
+   ]
+  },
+  {
+   "level": "WARN",
+   "id": "font-count",
+   "width": 1440,
+   "message": "3 typefaces in use (Inter, Arial, Source Serif 4).",
+   "fix": "Two at most.",
+   "alsoAt": [
+    768,
+    390
+   ]
+  },
+  {
+   "level": "WARN",
+   "id": "hero-void",
+   "width": 1440,
+   "message": "47% of the first screen is one empty block (780×780px at 0,120).",
+   "fix": "Place the void on purpose or fill it: move the picture, the film or one fact into it, grow the headline to meet it, or shrink the screen to its content. A void reads as placed only when something closes it on the far side and it is the screen's one rest."
+  },
+  {
+   "level": "WARN",
+   "id": "unused-canvas",
+   "width": 1440,
+   "message": "The content stops 251px short of the right edge while it starts 58px from the sidebar.",
+   "fix": "Let the grid fill the canvas (columns in fr units), or centre a capped canvas with equal margins. A dead strip on one side reads as unfinished."
+  }
+ ],
+ "images": [
+  {
+   "viewport": "desktop",
+   "width": 1440,
+   "fold": "C:\\Users\\eldav\\Documents\\CódigosProgramación\\JA_Legal\\JA_Legal\\.taste-skill\\after-login\\desktop-fold.jpg",
+   "pages": [
+    "C:\\Users\\eldav\\Documents\\CódigosProgramación\\JA_Legal\\JA_Legal\\.taste-skill\\after-login\\desktop-page-01.jpg"
+   ],
+   "film": []
+  },
+  {
+   "viewport": "tablet",
+   "width": 768,
+   "fold": "C:\\Users\\eldav\\Documents\\CódigosProgramación\\JA_Legal\\JA_Legal\\.taste-skill\\after-login\\tablet-fold.jpg",
+   "pages": [
+    "C:\\Users\\eldav\\Documents\\CódigosProgramación\\JA_Legal\\JA_Legal\\.taste-skill\\after-login\\tablet-page-01.jpg"
+   ],
+   "film": []
+  },
+  {
+   "viewport": "mobile",
+   "width": 390,
+   "fold": "C:\\Users\\eldav\\Documents\\CódigosProgramación\\JA_Legal\\JA_Legal\\.taste-skill\\after-login\\mobile-fold.jpg",
+   "pages": [
+    "C:\\Users\\eldav\\Documents\\CódigosProgramación\\JA_Legal\\JA_Legal\\.taste-skill\\after-login\\mobile-page-01.jpg"
+   ],
+   "film": []
+  }
+ ]
+}

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import logoSvg from "../assets/ja-legal-logo.svg";
 import { navigation } from "../data/site";
-import { ThemeToggle } from "./ThemeToggle";
 
 interface NavbarProps {
   onOpenPortal?: () => void;
@@ -56,7 +55,6 @@ export function Navbar({ onOpenPortal }: NavbarProps) {
             </a>
           </nav>
 
-          <ThemeToggle />
 
           <button
             className="menu"

@@ -40,7 +40,6 @@ import { FinanceSection } from "./FinanceSection";
 import { LegalCalculator } from "./LegalCalculator";
 import { SupabaseCasesTable } from "./SupabaseCasesTable";
 import { SystemArchitectureModal } from "./SystemArchitectureModal";
-import { ThemeToggle } from "./ThemeToggle";
 import { Sliders, Scale, FileText } from "./icons";
 import "./ClientPortal.css";
 
@@ -621,7 +620,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               </span>
             </div>
 
-            <ThemeToggle />
 
             {isFirm && caseRecord && (
               <button
@@ -1713,7 +1711,6 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
         <button type="button" onClick={handleBack} className="portal-back login-back" style={{ margin: 0 }}>
           ← Volver al sitio web principal
         </button>
-        <ThemeToggle />
       </div>
 
       <section className="portal-card login-card" style={{ maxWidth: "480px", padding: "28px 24px" }}>

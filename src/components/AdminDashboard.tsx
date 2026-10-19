@@ -466,7 +466,7 @@ export function AdminDashboard({
   const isSupabaseLive = currentCfg.isConfigured;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+    <div className="admin-dashboard-workspace" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
 
 
       {/* Encabezado del Dashboard de Administración */}

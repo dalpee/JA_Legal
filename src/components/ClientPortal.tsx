@@ -49,10 +49,9 @@ import { LegalCalculator } from "./LegalCalculator";
 import { SupabaseCasesTable } from "./SupabaseCasesTable";
 import { CaseDashboard } from "./CaseDashboard";
 import { SystemArchitectureModal } from "./SystemArchitectureModal";
-import { ThemeToggle } from "./ThemeToggle";
 import { fetchAuditEvents, isAuditLogReady, recordAuditEvent, type AuditAction, type AuditEntry } from "../lib/auditLog";
 import { startContinuousDatabaseTask, getCurrentSyncStatus, type SyncStatusInfo } from "../lib/syncService";
-import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText, Download, Upload } from "./icons";
+import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText, Download, Upload, Eye } from "./icons";
 import "./ClientPortal.css";
 
 interface ClientPortalProps {
@@ -780,7 +779,6 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               </span>
             </div>
 
-            <ThemeToggle />
 
             <button className="portal-logout" type="button" onClick={handleLogout}>
               Cerrar sesión
@@ -2316,7 +2314,6 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
         <button type="button" onClick={handleBack} className="portal-back login-back" style={{ margin: 0 }}>
           ← Volver al sitio web principal
         </button>
-        <ThemeToggle />
       </div>
 
       <section className="portal-card login-card" style={{ maxWidth: "480px", padding: "28px 30px" }}>
@@ -2334,7 +2331,7 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
           }}
         />
 
-        <p className="kicker" style={{ textAlign: "center" }}>Acceso Corporativo Seguro</p>
+        <p className="kicker" style={{ textAlign: "center" }}>Acceso seguro al portal</p>
         <h1 style={{ fontSize: "1.35rem", marginBottom: "6px", textAlign: "center" }}>
           Portal de Clientes &amp; Despacho
         </h1>
@@ -2351,7 +2348,7 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
               type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="marlon.jimenez"
+              placeholder="Usuario asignado por la firma"
               required
               autoFocus
               autoComplete="username"
@@ -2366,7 +2363,7 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
                 onClick={() => setShowPassword(!showPassword)}
                 style={{ background: "transparent", border: "none", color: "var(--brass-light)", fontSize: "0.74rem", cursor: "pointer", padding: "0 4px" }}
               >
-                {showPassword ? "🙈 Ocultar" : "👁️ Ver contraseña"}
+                <><Eye size={14} />{showPassword ? "Ocultar" : "Ver contraseña"}</>
               </button>
             </div>
             <input
