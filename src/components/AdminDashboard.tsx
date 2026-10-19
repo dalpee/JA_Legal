@@ -350,7 +350,7 @@ export function AdminDashboard({
         phone: editProfile.phone.trim(),
       });
       if (editNewPassword && !editPasswordUpdated) {
-        await resetManagedUserPassword(editingUser.id, editNewPassword);
+        await resetManagedUserPassword(editingUser.id, editingUser.email, editNewPassword);
         setEditPasswordUpdated(true);
         setCopiedNewCredentials(false);
         if (onRefreshUsers) onRefreshUsers();

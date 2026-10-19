@@ -1766,7 +1766,7 @@ export function getRealSupabaseClient() {
 
 // Actualiza la contraseña de otra cuenta mediante la función segura de Vercel.
 // La clave administrativa de Supabase nunca se expone al navegador.
-export async function resetManagedUserPassword(userId: string, newPassword: string): Promise<void> {
+export async function resetManagedUserPassword(userId: string, email: string, newPassword: string): Promise<void> {
   const client = getRealSupabaseClient();
   const { data: { session }, error: sessionError } = await client.auth.getSession();
   if (sessionError || !session?.access_token) {
@@ -1779,7 +1779,7 @@ export async function resetManagedUserPassword(userId: string, newPassword: stri
       "Content-Type": "application/json",
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ userId, password: newPassword }),
+    body: JSON.stringify({ userId, email, password: newPassword }),
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
