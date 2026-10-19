@@ -40,8 +40,8 @@ export default async function handler(request, response) {
     if (typeof userId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
       return response.status(400).json({ error: "No se encontró un ID válido para esta cuenta." });
     }
-    if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return response.status(400).json({ error: "No se encontró el correo asociado a esta cuenta." });
+    if (email != null && (typeof email !== "string" || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) {
+      return response.status(400).json({ error: "El correo asociado al perfil no tiene un formato válido." });
     }
     if (typeof password !== "string" || password.length < 8 || password.length > 72) {
       return response.status(400).json({ error: "La nueva contraseña debe tener entre 8 y 72 caracteres." });
@@ -54,6 +54,9 @@ export default async function handler(request, response) {
     if (updateError?.message.toLowerCase().includes("user not found")) {
       // Algunos perfiles antiguos tienen un UUID de plantilla. Resolver la cuenta Auth
       // por el correo guardado en el perfil y aplicar el cambio al UID verdadero.
+      if (typeof email !== "string" || !email.trim()) {
+        return response.status(404).json({ error: "El ID del perfil no corresponde a una cuenta Auth y el perfil no tiene correo asociado." });
+      }
       const normalizedEmail = email.trim().toLowerCase();
       let matchingAuthUser = null;
       for (let page = 1; page <= 20 && !matchingAuthUser; page += 1) {

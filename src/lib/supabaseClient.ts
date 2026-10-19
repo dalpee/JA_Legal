@@ -611,7 +611,7 @@ export async function fetchProfilesOrUsers(): Promise<StoredUser[]> {
           const localUser = locallyStoredUsers.find((u) => u.id === p.id || u.email.toLowerCase() === p.email?.toLowerCase());
           return ({
           id: p.id,
-          email: p.email || "",
+          email: p.email || localUser?.email || "",
           username: p.username || localUser?.username || "",
           full_name: p.full_name || (p.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ? "David Pérez" : "Usuario"),
           initials: p.initials || (p.full_name ? p.full_name.slice(0, 2).toUpperCase() : "US"),
