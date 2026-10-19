@@ -76,7 +76,7 @@ export const team: TeamMember[] = [
   {
     name: "Marlon David Jiménez Padilla",
     role: "Socio Fundador · Director de Litigios",
-    bio: "Abogado especialista en Derecho Procesal y Litigio Civil y Comercial. Con amplia trayectoria en representación ante juzgados de circuito y tribunales.",
+    bio: "Abogado egresado de la Universidad Libre, especialista en Derecho de los Negocios de la Universidad Externado de Colombia y cofundador de Jimenez & Ariza Asociados. Cuento con formación en insolvencia de persona natural no comerciante y pequeño comerciante, y conocimientos en economía, contratación y gestión empresarial que me permiten analizar cada asunto desde una perspectiva jurídica y financiera.\nMi práctica se enfoca en insolvencia, derecho comercial, asuntos administrativos, contratos y protección patrimonial. Acompaño a personas, emprendedores y empresas en la prevención de conflictos, la negociación de obligaciones y la defensa de sus intereses. Mi experiencia en el sector público complementa mi comprensión de los procedimientos administrativos y de la relación entre los ciudadanos y las entidades del Estado. Creo en una asesoría cercana, clara y personalizada. Mi compromiso es comprender las necesidades de cada cliente, explicar sus alternativas y construir estrategias jurídicas orientadas a soluciones prácticas y decisiones informadas.",
     initials: "MJ",
   },
   {
