@@ -517,7 +517,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
     const updated = [newRecord, ...finances];
     setFinances(updated);
     saveStoredFinances(updated);
-    if (newRecord.type === "ingreso" && caseRecord) {
+    if (newRecord.type === "ingreso" && newRecord.case_id && caseRecord?.id === newRecord.case_id) {
       const newBal = Math.max(0, (caseRecord.balance || 0) - newRecord.amount);
       handleUpdateCase({
         ...caseRecord,

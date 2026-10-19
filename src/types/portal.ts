@@ -83,7 +83,7 @@ export type FinancialRecord = {
   client_id?: string;
   client_name?: string;
   type: "ingreso" | "egreso";
-  category: "Honorarios" | "Anticipo" | "Cuota de Honorarios" | "Costas Procesales" | "Gastos Notaría / Registro" | "Peritaje Judicial" | "Viáticos y Transporte" | "Operativo Despacho";
+  category: string;
   concept: string;
   amount: number;
   // Campos del Modelo Excel de la Firma J&A Legal:

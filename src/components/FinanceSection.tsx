@@ -62,7 +62,19 @@ export function FinanceSection({
   onUpdateTransaction,
 }: FinanceSectionProps) {
   const isFirm = userProfile?.role === "firm";
-  const [activeTab, setActiveTab] = useState<"tabla" | "graficas">("tabla");
+  const [activeTab, setActiveTab] = useState<"tabla" | "graficas" | "contabilidad">("tabla");
+  const [accountingModalOpen, setAccountingModalOpen] = useState(false);
+  const [editingAccountingRecord, setEditingAccountingRecord] = useState<FinancialRecord | null>(null);
+  const [accountingType, setAccountingType] = useState<"ingreso" | "egreso">("egreso");
+  const [accountingCategory, setAccountingCategory] = useState("Operativo Despacho");
+  const [accountingBeneficiary, setAccountingBeneficiary] = useState("");
+  const [accountingReason, setAccountingReason] = useState("");
+  const [accountingAmount, setAccountingAmount] = useState(0);
+  const [accountingDate, setAccountingDate] = useState(new Date().toISOString().slice(0, 10));
+  const [accountingMethod, setAccountingMethod] = useState("Transferencia Bancaria");
+  const [accountingNotes, setAccountingNotes] = useState("");
+  const [accountingSearch, setAccountingSearch] = useState("");
+  const [accountingTypeFilter, setAccountingTypeFilter] = useState<"all" | "ingreso" | "egreso">("all");
 
   // Filtros y Búsqueda
   const [searchTerm, setSearchTerm] = useState("");
@@ -183,6 +195,54 @@ export function FinanceSection({
     }
   };
 
+  const generalMovements = finances.filter((item) => !item.case_id);
+  const accountingVisibleMovements = generalMovements.filter((item) => {
+    if (accountingTypeFilter !== "all" && item.type !== accountingTypeFilter) return false;
+    const q = accountingSearch.trim().toLowerCase();
+    return !q || [item.category, item.client_name, item.concept, item.payment_method, item.notes]
+      .some((value) => String(value || "").toLowerCase().includes(q));
+  }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  const accountingIncome = generalMovements.filter((item) => item.type === "ingreso").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const accountingExpenses = generalMovements.filter((item) => item.type === "egreso").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+  const openAccountingModal = (record?: FinancialRecord) => {
+    setEditingAccountingRecord(record || null);
+    setAccountingType(record?.type || "egreso");
+    setAccountingCategory(record?.category || "Operativo Despacho");
+    setAccountingBeneficiary(record?.client_name || "");
+    setAccountingReason(record?.concept || "");
+    setAccountingAmount(record?.amount || 0);
+    setAccountingDate(record?.date || new Date().toISOString().slice(0, 10));
+    setAccountingMethod(record?.payment_method || "Transferencia Bancaria");
+    setAccountingNotes(record?.notes || "");
+    setAccountingModalOpen(true);
+  };
+
+  const handleSaveAccountingMovement = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!accountingBeneficiary.trim() || !accountingReason.trim() || accountingAmount <= 0) return;
+    const record: FinancialRecord = {
+      id: editingAccountingRecord?.id || `accounting_${Date.now()}`,
+      client_name: accountingBeneficiary.trim(),
+      type: accountingType,
+      category: accountingCategory,
+      concept: accountingReason.trim(),
+      amount: Number(accountingAmount),
+      date: accountingDate,
+      status: "completado",
+      payment_method: accountingMethod as FinancialRecord["payment_method"],
+      receipt_number: editingAccountingRecord?.receipt_number || `MOV-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`,
+      notes: accountingNotes.trim(),
+    };
+    await syncFinancialRecordToDatabase(record);
+    if (editingAccountingRecord && onUpdateTransaction) onUpdateTransaction(record);
+    else if (editingAccountingRecord) {
+      onDeleteTransaction(editingAccountingRecord.id);
+      onAddTransaction(record);
+    } else onAddTransaction(record);
+    setAccountingModalOpen(false);
+  };
+
   // Exportar a Excel (CSV con BOM)
   const handleExportExcel = () => {
     const headers = [
@@ -230,6 +290,7 @@ export function FinanceSection({
   // Filtrado y Ordenamiento
   const filteredFinances = useMemo(() => {
     return finances
+      .filter((item) => Boolean(item.case_id))
       .filter((item) => {
         // Búsqueda
         if (searchTerm.trim()) {
@@ -350,14 +411,14 @@ export function FinanceSection({
               }}
             >
               <Plus size={16} />
-              <span>+ Nuevo Registro / Caso</span>
+              <span>+ Honorario de caso</span>
             </button>
           )}
         </div>
       </div>
 
       {/* Pestañas de Vista: Matriz Excel vs Soporte de Gráficas */}
-      <div style={{ display: "flex", gap: "12px", borderBottom: "2px solid var(--line)", paddingBottom: "10px" }}>
+      <div style={{ display: "flex", gap: "12px", borderBottom: "2px solid var(--line)", paddingBottom: "10px", flexWrap: "wrap" }}>
         <button
           type="button"
           onClick={() => setActiveTab("tabla")}
@@ -403,6 +464,7 @@ export function FinanceSection({
             KPIs
           </span>
         </button>
+        {isFirm && <button type="button" onClick={() => setActiveTab("contabilidad")} style={{ padding: "10px 18px", borderRadius: 7, border: activeTab === "contabilidad" ? "2px solid #38bdf8" : "1px solid transparent", background: activeTab === "contabilidad" ? "rgba(56,189,248,.16)" : "rgba(15,23,42,.5)", color: activeTab === "contabilidad" ? "#7dd3fc" : "var(--text-muted)", fontWeight: 800, cursor: "pointer" }}>🧾 Contabilidad general · {generalMovements.length}</button>}
       </div>
 
       {/* VISTA 1: TABLA FINANCIERA MODELO EXCEL */}
@@ -782,6 +844,28 @@ export function FinanceSection({
         </div>
       )}
 
+      {activeTab === "contabilidad" && isFirm && (
+        <section style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap", padding: 20, border: "1px solid var(--line)", borderRadius: 12, background: "linear-gradient(135deg, rgba(56,189,248,.12), var(--ink-soft) 65%)" }}>
+            <div><span className="kicker" style={{ color: "#7dd3fc", fontWeight: 800 }}>REGISTRO INDEPENDIENTE DE EXPEDIENTES</span><h3 style={{ margin: "5px 0", color: "var(--text-bright)" }}>Ingresos y egresos del despacho</h3><p style={{ margin: 0, color: "var(--text-muted)", fontSize: ".82rem" }}>Registra caja, pagos operativos, reembolsos y otros movimientos con beneficiario y motivo.</p></div>
+            <button type="button" onClick={() => openAccountingModal()} className="btn primary" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><Plus size={16}/> Registrar movimiento</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
+            {[{label:"Ingresos generales",amount:accountingIncome,color:"#4ade80"},{label:"Egresos generales",amount:accountingExpenses,color:"#f87171"},{label:"Balance neto",amount:accountingIncome-accountingExpenses,color:accountingIncome-accountingExpenses>=0?"#7dd3fc":"#f87171"}].map((card)=><div key={card.label} style={{ padding: 17, borderRadius: 10, background: "var(--ink-panel)", border: "1px solid var(--line)" }}><div style={{ color: "var(--text-muted)", fontSize: ".78rem" }}>{card.label}</div><strong style={{ display:"block", color:card.color, fontSize:"1.15rem", marginTop:7 }}>{formatCOP(card.amount)}</strong><small style={{ color:"var(--text-muted)" }}>Movimientos sin expediente asociado</small></div>)}
+          </div>
+
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap", padding:12, borderRadius:9, background:"var(--parchment-deep)", border:"1px solid var(--line)" }}>
+            <input value={accountingSearch} onChange={(e)=>setAccountingSearch(e.target.value)} placeholder="Buscar beneficiario, motivo, categoría o nota…" style={{ flex:"1 1 260px", minWidth:0, padding:10, background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)" }}/>
+            <select value={accountingTypeFilter} onChange={(e)=>setAccountingTypeFilter(e.target.value as "all"|"ingreso"|"egreso")} style={{ padding:"9px 12px", background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)" }}><option value="all">Ingresos y egresos</option><option value="ingreso">Solo ingresos</option><option value="egreso">Solo egresos</option></select>
+          </div>
+
+          <div style={{ overflowX:"auto", border:"1px solid var(--line)", borderRadius:10 }}><table style={{ width:"100%", minWidth:900, borderCollapse:"collapse", fontSize:".8rem" }}><thead><tr style={{ background:"var(--ink-panel)", color:"var(--text-muted)", textAlign:"left" }}>{["Fecha","Movimiento","Categoría","Beneficiario","Motivo / descripción","Medio","Valor","Acciones"].map(h=><th key={h} style={{ padding:"12px 10px", borderBottom:"1px solid var(--line)" }}>{h}</th>)}</tr></thead><tbody>
+            {accountingVisibleMovements.length===0 ? <tr><td colSpan={8} style={{ padding:36, textAlign:"center", color:"var(--text-muted)" }}>Aún no hay movimientos generales. Registra el primer ingreso o egreso del despacho.</td></tr> : accountingVisibleMovements.map((record)=><tr key={record.id} style={{ borderBottom:"1px solid var(--line)" }}><td style={{ padding:"12px 10px", whiteSpace:"nowrap" }}>{formatDateDisplay(record.date)}</td><td style={{ padding:"12px 10px", color:record.type==="ingreso"?"#4ade80":"#f87171", fontWeight:800 }}>{record.type==="ingreso"?"＋ Ingreso":"− Egreso"}</td><td style={{ padding:"12px 10px" }}>{record.category}</td><td style={{ padding:"12px 10px", fontWeight:700 }}>{record.client_name||"—"}</td><td style={{ padding:"12px 10px", minWidth:180 }}>{record.concept}<div style={{ color:"var(--text-muted)", fontSize:".72rem", marginTop:3 }}>{record.notes||""}</div></td><td style={{ padding:"12px 10px" }}>{record.payment_method}</td><td style={{ padding:"12px 10px", whiteSpace:"nowrap", fontWeight:800, color:record.type==="ingreso"?"#4ade80":"#f87171" }}>{record.type==="egreso"?"−":"＋"}{formatCOP(record.amount)}</td><td style={{ padding:"12px 10px" }}><div style={{ display:"flex", gap:6 }}><button type="button" title="Editar movimiento" onClick={()=>openAccountingModal(record)} style={{ padding:6, background:"transparent", border:"1px solid var(--line)", color:"var(--text-bright)", borderRadius:5, cursor:"pointer" }}><Edit size={14}/></button><button type="button" title="Eliminar movimiento" onClick={()=>handleDelete(record.id,record.concept)} style={{ padding:6, background:"transparent", border:"1px solid rgba(248,113,113,.35)", color:"#f87171", borderRadius:5, cursor:"pointer" }}><Trash2 size={14}/></button></div></td></tr>)}
+            </tbody><tfoot><tr style={{ background:"var(--ink-panel)", fontWeight:800 }}><td colSpan={6} style={{ padding:12 }}>Historial visible ({accountingVisibleMovements.length} movimientos)</td><td colSpan={2} style={{ padding:12, color:"var(--text-bright)" }}>Ingresos {formatCOP(accountingVisibleMovements.filter(m=>m.type==="ingreso").reduce((s,m)=>s+m.amount,0))} · Egresos {formatCOP(accountingVisibleMovements.filter(m=>m.type==="egreso").reduce((s,m)=>s+m.amount,0))}</td></tr></tfoot></table></div>
+        </section>
+      )}
+
       {/* VISTA 2: SOPORTE DE GRÁFICAS DE LO FINANCIERO */}
       {activeTab === "graficas" && (
         <FinancialCharts finances={filteredFinances} isFirm={isFirm} />
@@ -1133,6 +1217,27 @@ export function FinanceSection({
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {accountingModalOpen && isFirm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(2,6,16,.78)", backdropFilter:"blur(4px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:10000, padding:16 }}>
+          <form onSubmit={handleSaveAccountingMovement} style={{ width:"100%", maxWidth:620, maxHeight:"92vh", overflowY:"auto", padding:24, border:"1px solid #38bdf8", borderRadius:14, background:"var(--ink-soft)", boxShadow:"0 24px 80px rgba(0,0,0,.55)", display:"flex", flexDirection:"column", gap:14 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid var(--line)", paddingBottom:12 }}><div><span style={{ color:"#7dd3fc", fontSize:".72rem", fontWeight:800, letterSpacing:".08em" }}>CONTABILIDAD GENERAL</span><h3 style={{ margin:"4px 0 0", color:"var(--text-bright)" }}>{editingAccountingRecord?"Editar movimiento":"Registrar ingreso o egreso"}</h3></div><button type="button" onClick={()=>setAccountingModalOpen(false)} style={{ background:"transparent", border:0, color:"var(--text-muted)", cursor:"pointer" }}><X size={20}/></button></div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <label style={{ display:"flex", flexDirection:"column", gap:6, fontSize:".8rem", color:"var(--text-muted)" }}>Tipo de movimiento<select value={accountingType} onChange={(e)=>{const type=e.target.value as "ingreso"|"egreso";setAccountingType(type);setAccountingCategory(type==="ingreso"?"Ingreso de servicios":"Operativo Despacho");}} style={{ padding:10, background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)" }}><option value="ingreso">Ingreso</option><option value="egreso">Egreso</option></select></label>
+              <label style={{ display:"flex", flexDirection:"column", gap:6, fontSize:".8rem", color:"var(--text-muted)" }}>Categoría<select required value={accountingCategory} onChange={(e)=>setAccountingCategory(e.target.value)} style={{ padding:10, background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)" }}>{(accountingType==="ingreso"?["Ingreso de servicios","Reembolso","Intereses","Venta de activo","Otro ingreso"]:["Operativo Despacho","Arriendo","Servicios públicos","Nómina / Honorarios","Transporte","Papelería","Impuestos","Peritaje","Otro egreso"]).map((category)=><option key={category} value={category}>{category}</option>)}</select></label>
+            </div>
+            <label style={{ display:"flex", flexDirection:"column", gap:6, fontSize:".8rem", color:"var(--text-muted)" }}>Beneficiario / quién paga<input required value={accountingBeneficiary} onChange={(e)=>setAccountingBeneficiary(e.target.value)} placeholder="Nombre de la persona o entidad" style={{ padding:10, background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)" }}/></label>
+            <label style={{ display:"flex", flexDirection:"column", gap:6, fontSize:".8rem", color:"var(--text-muted)" }}>Motivo del movimiento<input required value={accountingReason} onChange={(e)=>setAccountingReason(e.target.value)} placeholder="Ej. Pago de arriendo de oficina, compra de papelería…" style={{ padding:10, background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)" }}/></label>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <label style={{ display:"flex", flexDirection:"column", gap:6, fontSize:".8rem", color:"var(--text-muted)" }}>Valor (COP)<input required type="number" min="1" value={accountingAmount||""} onChange={(e)=>setAccountingAmount(Number(e.target.value))} placeholder="0" style={{ padding:10, background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)" }}/></label>
+              <label style={{ display:"flex", flexDirection:"column", gap:6, fontSize:".8rem", color:"var(--text-muted)" }}>Fecha<input required type="date" value={accountingDate} onChange={(e)=>setAccountingDate(e.target.value)} style={{ padding:10, background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)" }}/></label>
+            </div>
+            <label style={{ display:"flex", flexDirection:"column", gap:6, fontSize:".8rem", color:"var(--text-muted)" }}>Medio de pago<select value={accountingMethod} onChange={(e)=>setAccountingMethod(e.target.value)} style={{ padding:10, background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)" }}>{["Transferencia Bancaria","PSE","Efectivo","Cheque","Tarjeta","Otro"].map((method)=><option key={method}>{method}</option>)}</select></label>
+            <label style={{ display:"flex", flexDirection:"column", gap:6, fontSize:".8rem", color:"var(--text-muted)" }}>Notas y referencia<textarea rows={3} value={accountingNotes} onChange={(e)=>setAccountingNotes(e.target.value)} placeholder="Número de comprobante, referencia bancaria o detalle adicional" style={{ padding:10, background:"var(--ink-panel)", border:"1px solid var(--line)", borderRadius:6, color:"var(--text-bright)", resize:"vertical" }}/></label>
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:10, paddingTop:6 }}><button type="button" onClick={()=>setAccountingModalOpen(false)} className="btn">Cancelar</button><button type="submit" className="btn primary" disabled={accountingAmount<=0||!accountingReason.trim()||!accountingBeneficiary.trim()}>{editingAccountingRecord?"Guardar cambios":"Guardar en historial"}</button></div>
+          </form>
         </div>
       )}
     </article>
