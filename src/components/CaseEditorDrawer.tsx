@@ -60,6 +60,7 @@ export function CaseEditorDrawer({
   const existingFinance = finances.find((item) => item.case_id === caseRecord.id || item.concept === caseRecord.title);
   const [feeTotal, setFeeTotal] = useState(existingFinance?.total_pactado ?? caseRecord.total_fees ?? 0);
   const [feeReceived, setFeeReceived] = useState(existingFinance?.abono_recibido ?? Math.max(0, (caseRecord.total_fees || 0) - (caseRecord.balance || 0)));
+  const [newPaymentAmount, setNewPaymentAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState(existingFinance?.forma_cobro || existingFinance?.payment_method || "Transferencia Bancaria");
   const [paymentDate, setPaymentDate] = useState(existingFinance?.fecha_ultimo_abono || existingFinance?.date || new Date().toISOString().slice(0, 10));
   const [feeNotes, setFeeNotes] = useState(existingFinance?.notes || "");
@@ -75,9 +76,9 @@ export function CaseEditorDrawer({
   }, [caseRecord.id, caseRecord.title, caseRecord.total_fees, caseRecord.balance, finances]);
 
   const feeBalance = Math.max(0, feeTotal - feeReceived);
-  const saveFeeDetails = async () => {
+  const saveFeeDetails = async (receivedOverride?: number) => {
     const total = Math.max(0, Number(feeTotal) || 0);
-    const received = Math.min(total, Math.max(0, Number(feeReceived) || 0));
+    const received = Math.min(total, Math.max(0, Number(receivedOverride ?? feeReceived) || 0));
     const balance = Math.max(0, total - received);
     const pctMarlon = existingFinance?.pct_marlon ?? 60;
     const receivedStatus: FinancialRecord["payment_status"] = received >= total && total > 0 ? "Pagado" : received > 0 ? "Abono parcial" : "Pendiente";
@@ -110,6 +111,7 @@ export function CaseEditorDrawer({
     };
     await onSaveCaseFinance(record);
     onUpdateCase({ ...caseRecord, total_fees: total, balance, last_update: new Date().toISOString().slice(0, 10) });
+    setFeeReceived(received);
     setFeeSaved(true);
     window.setTimeout(() => setFeeSaved(false), 2400);
   };
@@ -732,7 +734,13 @@ export function CaseEditorDrawer({
               {[{label:"Total pactado",value:feeTotal},{label:"Abonos recibidos",value:feeReceived},{label:"Saldo pendiente",value:feeBalance}].map((item) => <div key={item.label} style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 10, background: "var(--ink-panel)" }}><div style={{ color: "var(--text-muted)", fontSize: ".74rem" }}>{item.label}</div><strong style={{ display:"block", marginTop:5, color:item.label==="Saldo pendiente"?"var(--sage)":"var(--text-bright)" }}>{new Intl.NumberFormat("es-CO",{style:"currency",currency:"COP",maximumFractionDigits:0}).format(item.value)}</strong></div>)}
             </div>
             <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Honorarios totales pactados (COP)<input type="number" min="0" value={feeTotal} onChange={(e)=>setFeeTotal(Number(e.target.value))} style={{ padding: 11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}/></label>
-            <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Total abonado por el cliente (COP)<input type="number" min="0" max={feeTotal} value={feeReceived} onChange={(e)=>setFeeReceived(Number(e.target.value))} style={{ padding: 11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}/></label>
+            <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Abonos acumulados (COP)<input type="number" min="0" max={feeTotal} value={feeReceived} onChange={(e)=>setFeeReceived(Number(e.target.value))} style={{ padding: 11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}/></label>
+            <div style={{ padding: 16, border: "1px solid var(--line)", borderRadius: 9, background: "var(--ink-panel)", display: "flex", flexDirection: "column", gap: 10 }}>
+              <strong style={{ fontSize: ".86rem", color: "var(--text-bright)" }}>Registrar un nuevo abono</strong>
+              <label style={{ fontSize: ".78rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Valor recibido hoy (COP)<input type="number" min="0" max={Math.max(0, feeBalance)} value={newPaymentAmount || ""} onChange={(e)=>setNewPaymentAmount(Number(e.target.value))} placeholder="Escribe el valor del nuevo pago" style={{ padding: 11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}/></label>
+              <button type="button" disabled={newPaymentAmount <= 0 || newPaymentAmount > feeBalance} onClick={async()=>{ await saveFeeDetails(feeReceived + newPaymentAmount); setNewPaymentAmount(0); }} style={{ padding:"10px 14px", border:0, borderRadius:7, background:newPaymentAmount > 0 && newPaymentAmount <= feeBalance ? "var(--sage)" : "var(--line)", color:"var(--ink)", fontWeight:700, cursor:newPaymentAmount > 0 && newPaymentAmount <= feeBalance ? "pointer" : "not-allowed" }}>＋ Registrar abono y actualizar saldo</button>
+              {newPaymentAmount > feeBalance && <span style={{ color:"#e08a8a", fontSize:".76rem" }}>El abono supera el saldo pendiente del caso.</span>}
+            </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
               <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Forma de pago<select value={paymentMethod} onChange={(e)=>setPaymentMethod(e.target.value)} style={{ padding:11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}>{["Transferencia Bancaria","PSE","Efectivo","Cheque"].map(x=><option key={x}>{x}</option>)}</select></label>
               <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Fecha del último abono<input type="date" value={paymentDate} onChange={(e)=>setPaymentDate(e.target.value)} style={{ padding:11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}/></label>
