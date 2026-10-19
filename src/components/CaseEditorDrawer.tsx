@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { CaseRecord, AgendaItem, HistoryItem, DocumentItem, Profile } from "../types/portal";
+import { CaseRecord, AgendaItem, HistoryItem, DocumentItem, Profile, FinancialRecord } from "../types/portal";
 import { caseTemplates } from "../data/initialData";
 import { syncDocumentToDatabase, deleteDocumentFromDatabase } from "../lib/supabaseClient";
 import {
@@ -33,6 +33,8 @@ interface CaseEditorDrawerProps {
   onResetDefaults: () => void;
   onLoadTemplate: (templateId: string) => void;
   onEnterPresentationMode: () => void;
+  finances: FinancialRecord[];
+  onSaveCaseFinance: (record: FinancialRecord) => Promise<void> | void;
 }
 
 export function CaseEditorDrawer({
@@ -51,8 +53,66 @@ export function CaseEditorDrawer({
   onResetDefaults,
   onLoadTemplate,
   onEnterPresentationMode,
+  finances,
+  onSaveCaseFinance,
 }: CaseEditorDrawerProps) {
-  const [activeTab, setActiveTab] = useState<"general" | "agenda" | "historial" | "documentos" | "cliente">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "agenda" | "historial" | "documentos" | "cliente" | "abonos">("general");
+  const existingFinance = finances.find((item) => item.case_id === caseRecord.id || item.concept === caseRecord.title);
+  const [feeTotal, setFeeTotal] = useState(existingFinance?.total_pactado ?? caseRecord.total_fees ?? 0);
+  const [feeReceived, setFeeReceived] = useState(existingFinance?.abono_recibido ?? Math.max(0, (caseRecord.total_fees || 0) - (caseRecord.balance || 0)));
+  const [paymentMethod, setPaymentMethod] = useState(existingFinance?.forma_cobro || existingFinance?.payment_method || "Transferencia Bancaria");
+  const [paymentDate, setPaymentDate] = useState(existingFinance?.fecha_ultimo_abono || existingFinance?.date || new Date().toISOString().slice(0, 10));
+  const [feeNotes, setFeeNotes] = useState(existingFinance?.notes || "");
+  const [feeSaved, setFeeSaved] = useState(false);
+
+  React.useEffect(() => {
+    const record = finances.find((item) => item.case_id === caseRecord.id || item.concept === caseRecord.title);
+    setFeeTotal(record?.total_pactado ?? caseRecord.total_fees ?? 0);
+    setFeeReceived(record?.abono_recibido ?? Math.max(0, (caseRecord.total_fees || 0) - (caseRecord.balance || 0)));
+    setPaymentMethod(record?.forma_cobro || record?.payment_method || "Transferencia Bancaria");
+    setPaymentDate(record?.fecha_ultimo_abono || record?.date || new Date().toISOString().slice(0, 10));
+    setFeeNotes(record?.notes || "");
+  }, [caseRecord.id, caseRecord.title, caseRecord.total_fees, caseRecord.balance, finances]);
+
+  const feeBalance = Math.max(0, feeTotal - feeReceived);
+  const saveFeeDetails = async () => {
+    const total = Math.max(0, Number(feeTotal) || 0);
+    const received = Math.min(total, Math.max(0, Number(feeReceived) || 0));
+    const balance = Math.max(0, total - received);
+    const pctMarlon = existingFinance?.pct_marlon ?? 60;
+    const receivedStatus: FinancialRecord["payment_status"] = received >= total && total > 0 ? "Pagado" : received > 0 ? "Abono parcial" : "Pendiente";
+    const record: FinancialRecord = {
+      ...(existingFinance || {} as FinancialRecord),
+      id: existingFinance?.id || `fin_${caseRecord.id}`,
+      case_id: caseRecord.id,
+      case_name: caseRecord.title,
+      client_id: caseRecord.client_id,
+      client_name: caseRecord.client_name || profile.full_name,
+      type: "ingreso",
+      category: "Honorarios",
+      concept: caseRecord.title,
+      amount: received,
+      total_pactado: total,
+      abono_recibido: received,
+      saldo_pendiente: balance,
+      forma_cobro: paymentMethod,
+      pct_marlon: pctMarlon,
+      pct_sebastian: 100 - pctMarlon,
+      marlon_recibe: Math.round(received * pctMarlon / 100),
+      sebastian_recibe: Math.round(received * (100 - pctMarlon) / 100),
+      payment_status: receivedStatus,
+      fecha_ultimo_abono: received > 0 ? paymentDate : existingFinance?.fecha_ultimo_abono,
+      date: paymentDate,
+      status: receivedStatus === "Pagado" ? "completado" : "pendiente",
+      payment_method: paymentMethod as FinancialRecord["payment_method"],
+      receipt_number: existingFinance?.receipt_number || `REC-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
+      notes: feeNotes.trim(),
+    };
+    await onSaveCaseFinance(record);
+    onUpdateCase({ ...caseRecord, total_fees: total, balance, last_update: new Date().toISOString().slice(0, 10) });
+    setFeeSaved(true);
+    window.setTimeout(() => setFeeSaved(false), 2400);
+  };
 
   // New Agenda Item Form state
   const [newAgendaDate, setNewAgendaDate] = useState("2026-10-30");
@@ -169,7 +229,11 @@ export function CaseEditorDrawer({
   if (!isOpen) return null;
 
   return (
+    <>
+    <style>{`@keyframes caseDrawerEnter { from { transform: translateX(24px); opacity: .65 } to { transform: translateX(0); opacity: 1 } } @keyframes caseContentEnter { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } } .case-editor-tab { transition: color .18s ease, background .18s ease, border-color .18s ease; } .case-editor-tab:hover { background: rgba(217,181,106,.08) !important; color: var(--brass-light) !important; } .case-editor-content { animation: caseContentEnter .24s ease both; } @media (prefers-reduced-motion: reduce) { .case-editor-drawer, .case-editor-content { animation: none !important; } }`}</style>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 99, background: "rgba(3, 9, 20, .48)", backdropFilter: "blur(2px)" }} />
     <div
+      className="case-editor-drawer"
       style={{
         position: "fixed",
         top: 0,
@@ -178,6 +242,8 @@ export function CaseEditorDrawer({
         zIndex: 100,
         width: "100%",
         maxWidth: "620px",
+        zIndex: 100,
+        animation: "caseDrawerEnter .28s cubic-bezier(.2,.75,.25,1) both",
         backgroundColor: "var(--ink-soft)",
         borderLeft: "2px solid var(--brass)",
         boxShadow: "-10px 0 40px rgba(0, 0, 0, 0.65)",
@@ -224,7 +290,7 @@ export function CaseEditorDrawer({
                   color: "var(--text-bright)",
                 }}
               >
-                Simulador del Caso &amp; Avance
+                Editor integral del caso
               </h2>
               <span
                 style={{
@@ -242,7 +308,7 @@ export function CaseEditorDrawer({
               </span>
             </div>
             <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-              Modifique los datos en tiempo real para mostrar al cliente
+              {caseRecord.title} · cambios guardados en el portal
             </p>
           </div>
         </div>
@@ -347,7 +413,8 @@ export function CaseEditorDrawer({
         }}
       >
         {[
-          { id: "general", label: "Caso & Avance", icon: Scale },
+          { id: "general", label: "Caso", icon: Scale },
+          { id: "abonos", label: "Abonos", icon: FileText },
           { id: "agenda", label: `Agenda (${agenda.length})`, icon: Calendar },
           { id: "historial", label: `Actuaciones (${history.length})`, icon: Clock },
           { id: "documentos", label: `Expediente (${documents.length})`, icon: FileText },
@@ -358,6 +425,7 @@ export function CaseEditorDrawer({
           return (
             <button
               key={tab.id}
+              className="case-editor-tab"
               type="button"
               onClick={() => setActiveTab(tab.id as any)}
               style={{
@@ -397,7 +465,7 @@ export function CaseEditorDrawer({
       >
         {/* ===================== TAB: GENERAL & PROGRESO ===================== */}
         {activeTab === "general" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div className="case-editor-content" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
             {/* Live Progress Control */}
             <div
               style={{
@@ -502,6 +570,15 @@ export function CaseEditorDrawer({
               </label>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+                <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>Tipo de proceso
+                  <input type="text" value={caseRecord.process_type || ""} onChange={(e) => handleCaseChange("process_type", e.target.value)} placeholder="Ej. Proceso civil ordinario" style={{ padding: "10px 12px", background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "4px", color: "var(--text-bright)" }} />
+                </label>
+                <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>Ciudad
+                  <input type="text" value={caseRecord.city || ""} onChange={(e) => handleCaseChange("city", e.target.value)} style={{ padding: "10px 12px", background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "4px", color: "var(--text-bright)" }} />
+                </label>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
                 <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>
                   Radicado Judicial
                   <input
@@ -537,6 +614,10 @@ export function CaseEditorDrawer({
                   />
                 </label>
               </div>
+
+              <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>Contraparte
+                <input type="text" value={caseRecord.counterparty || ""} onChange={(e) => handleCaseChange("counterparty", e.target.value)} placeholder="Nombre de la contraparte" style={{ padding: "10px 12px", background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "4px", color: "var(--text-bright)" }} />
+              </label>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
                 <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -615,7 +696,49 @@ export function CaseEditorDrawer({
                   </button>
                 ))}
               </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+                <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>Fase actual
+                  <input type="text" value={caseRecord.current_phase || ""} onChange={(e) => handleCaseChange("current_phase", e.target.value)} placeholder="Etapa actual del proceso" style={{ padding: "10px 12px", background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "4px", color: "var(--text-bright)" }} />
+                </label>
+                <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>Próxima actuación
+                  <input type="text" value={caseRecord.next_step || ""} onChange={(e) => handleCaseChange("next_step", e.target.value)} placeholder="Siguiente paso previsto" style={{ padding: "10px 12px", background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "4px", color: "var(--text-bright)" }} />
+                </label>
+              </div>
+              <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>Resumen y observaciones visibles en el portal
+                <textarea rows={4} value={caseRecord.observations || ""} onChange={(e) => handleCaseChange("observations", e.target.value)} placeholder="Actualización o resumen para el cliente" style={{ padding: "10px 12px", background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "4px", color: "var(--text-bright)", resize: "vertical" }} />
+              </label>
+              <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>Estilo del estado
+                <select value={caseRecord.status_type || "info"} onChange={(e) => handleCaseChange("status_type", e.target.value)} style={{ padding: "10px 12px", background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: "4px", color: "var(--text-bright)" }}>
+                  <option value="info">Informativo</option><option value="warning">Atención requerida</option><option value="success">Favorable / completado</option><option value="neutral">Neutral</option>
+                </select>
+              </label>
+              <div style={{ padding: 16, background: "var(--ink-panel)", border: "1px solid var(--line)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><strong style={{ fontSize: ".86rem" }}>Fases del proceso</strong><button type="button" onClick={() => handleCaseChange("phases", [...(caseRecord.phases || []), { id: `phase_${Date.now()}`, name: "Nueva fase", description: "", status: "pending" }])} style={{ border: "1px solid var(--line)", background: "var(--ink)", color: "var(--brass-light)", borderRadius: 6, padding: "6px 10px", cursor: "pointer" }}>+ Añadir fase</button></div>
+                {(caseRecord.phases || []).length === 0 && <span style={{ color: "var(--text-muted)", fontSize: ".78rem" }}>Agrega etapas para mostrar el avance detallado del expediente.</span>}
+                {(caseRecord.phases || []).map((phase, index) => <div key={phase.id} style={{ display: "grid", gridTemplateColumns: "1fr 150px 32px", gap: 8 }}><input value={phase.name} onChange={(e) => handleCaseChange("phases", (caseRecord.phases || []).map((item, i) => i === index ? { ...item, name: e.target.value } : item))} aria-label="Nombre de la fase" style={{ minWidth: 0, padding: 9, background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--text-bright)" }}/><select value={phase.status} onChange={(e) => handleCaseChange("phases", (caseRecord.phases || []).map((item, i) => i === index ? { ...item, status: e.target.value as "completed" | "in_progress" | "pending" } : item))} aria-label="Estado de fase" style={{ padding: 8, background: "var(--parchment-deep)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--text-bright)" }}><option value="pending">Pendiente</option><option value="in_progress">En curso</option><option value="completed">Completada</option></select><button type="button" aria-label="Eliminar fase" onClick={() => handleCaseChange("phases", (caseRecord.phases || []).filter((_, i) => i !== index))} style={{ border: "1px solid var(--line)", background: "transparent", color: "#e08a8a", borderRadius: 5, cursor: "pointer" }}>×</button></div>)}
+              </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === "abonos" && (
+          <div className="case-editor-content" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <div style={{ padding: 20, borderRadius: 12, background: "linear-gradient(135deg, rgba(217,181,106,.16), var(--ink-panel) 70%)", border: "1px solid var(--brass)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, color: "var(--brass-light)", fontWeight: 700 }}><Sparkles size={18}/> Honorarios y abonos</div>
+              <p style={{ margin: "7px 0 0", color: "var(--text-muted)", fontSize: ".84rem", lineHeight: 1.5 }}>Actualiza el valor pactado y el total recibido. El saldo del caso y el panel de Economía se sincronizan al guardar.</p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {[{label:"Total pactado",value:feeTotal},{label:"Abonos recibidos",value:feeReceived},{label:"Saldo pendiente",value:feeBalance}].map((item) => <div key={item.label} style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 10, background: "var(--ink-panel)" }}><div style={{ color: "var(--text-muted)", fontSize: ".74rem" }}>{item.label}</div><strong style={{ display:"block", marginTop:5, color:item.label==="Saldo pendiente"?"var(--sage)":"var(--text-bright)" }}>{new Intl.NumberFormat("es-CO",{style:"currency",currency:"COP",maximumFractionDigits:0}).format(item.value)}</strong></div>)}
+            </div>
+            <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Honorarios totales pactados (COP)<input type="number" min="0" value={feeTotal} onChange={(e)=>setFeeTotal(Number(e.target.value))} style={{ padding: 11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}/></label>
+            <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Total abonado por el cliente (COP)<input type="number" min="0" max={feeTotal} value={feeReceived} onChange={(e)=>setFeeReceived(Number(e.target.value))} style={{ padding: 11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}/></label>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Forma de pago<select value={paymentMethod} onChange={(e)=>setPaymentMethod(e.target.value)} style={{ padding:11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}>{["Transferencia Bancaria","PSE","Efectivo","Cheque"].map(x=><option key={x}>{x}</option>)}</select></label>
+              <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Fecha del último abono<input type="date" value={paymentDate} onChange={(e)=>setPaymentDate(e.target.value)} style={{ padding:11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)" }}/></label>
+            </div>
+            <label style={{ fontSize: ".8rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>Notas de pago<textarea value={feeNotes} onChange={(e)=>setFeeNotes(e.target.value)} rows={3} placeholder="Referencia, acuerdo de cuotas o comentario…" style={{ padding:11, background:"var(--parchment-deep)", border:"1px solid var(--line)", borderRadius:7, color:"var(--text-bright)", resize:"vertical" }}/></label>
+            <button type="button" onClick={saveFeeDetails} style={{ padding:"12px 16px", border:0, borderRadius:8, background:"var(--brass)", color:"var(--ink)", fontWeight:700, cursor:"pointer", transition:"transform .16s ease" }}>{feeSaved ? "✓ Abonos guardados" : "Guardar honorarios y abonos"}</button>
           </div>
         )}
 
@@ -1046,5 +1169,6 @@ export function CaseEditorDrawer({
         </button>
       </div>
     </div>
+    </>
   );
 }

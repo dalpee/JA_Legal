@@ -2017,6 +2017,16 @@ J&A LEGAL ASOCIADOS - COPIA DIGITAL OFICIAL AUTORIZADA`;
               setIsEditorOpen(false);
               setIsPresentationMode(true);
             }}
+            finances={finances}
+            onSaveCaseFinance={async (record) => {
+              const existing = finances.find((item) => item.case_id === record.case_id || item.concept === record.concept);
+              const next = existing
+                ? finances.map((item) => item.id === existing.id ? { ...record, id: existing.id } : item)
+                : [record, ...finances];
+              setFinances(next);
+              saveStoredFinances(next);
+              await syncFinancialRecordToDatabase(existing ? { ...record, id: existing.id } : record);
+            }}
           />
         )}
 
