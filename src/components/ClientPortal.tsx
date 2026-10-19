@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import logo from "../assets/ja-legal-logo.svg";
 import companyLogo from "../assets/ja-legal-login-logo.png";
@@ -50,6 +50,7 @@ import { SupabaseCasesTable } from "./SupabaseCasesTable";
 import { CaseDashboard } from "./CaseDashboard";
 import { SystemArchitectureModal } from "./SystemArchitectureModal";
 import { ThemeToggle } from "./ThemeToggle";
+import { fetchAuditEvents, isAuditLogReady, recordAuditEvent, type AuditAction, type AuditEntry } from "../lib/auditLog";
 import { startContinuousDatabaseTask, getCurrentSyncStatus, type SyncStatusInfo } from "../lib/syncService";
 import { Sliders, Sparkles, CheckCircle2, ArrowRight, Scale, FileText, Download, Upload } from "./icons";
 import "./ClientPortal.css";
@@ -115,7 +116,10 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [finances, setFinances] = useState<FinancialRecord[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEntry[]>([]);
+  const [auditCloudReady, setAuditCloudReady] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
+  const pendingCaseAudit = useRef<Record<string, { timer: ReturnType<typeof setTimeout>; fields: Set<string> }>>({});
 
   // Modal para crear y editar procesos
   const [isCreateCaseModalOpen, setIsCreateCaseModalOpen] = useState(false);
@@ -131,7 +135,38 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const [activeSection, setActiveSection] = useState<
     "resumen" | "tablero" | "proceso" | "agenda" | "documentos" | "historial" | "economia" | "calculadora" | "admin"
   >("resumen");
-  const [adminSubTab, setAdminSubTab] = useState<"casos" | "clientes" | "conexion_supabase">("casos");
+  const [adminSubTab, setAdminSubTab] = useState<"casos" | "clientes" | "conexion_supabase" | "auditoria">("casos");
+
+  const recordAudit = (action: AuditAction, entity: string, entityId: string | undefined, summary: string) => {
+    if (!profile || profile.role !== "firm") return;
+    void recordAuditEvent({
+      actor_id: profile.id,
+      actor_email: profile.email || session?.user.email || "",
+      actor_name: profile.full_name,
+      action,
+      entity,
+      entity_id: entityId,
+      summary,
+    }).then((entry) => setAuditEvents((current) => [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, 100)));
+  };
+
+  const scheduleCaseAudit = (previous: CaseRecord | null | undefined, updated: CaseRecord) => {
+    const changedFields = Object.keys(updated).filter((key) => JSON.stringify((previous as any)?.[key]) !== JSON.stringify((updated as any)[key]));
+    if (!changedFields.length) return;
+    const pending = pendingCaseAudit.current[updated.id];
+    if (pending) {
+      clearTimeout(pending.timer);
+      changedFields.forEach((field) => pending.fields.add(field));
+    } else {
+      pendingCaseAudit.current[updated.id] = { timer: setTimeout(() => undefined, 0), fields: new Set(changedFields) };
+    }
+    const target = pendingCaseAudit.current[updated.id];
+    target.timer = setTimeout(() => {
+      const fields = [...target.fields].join(", ");
+      recordAudit("UPDATE", "case", updated.id, `Actualizó el expediente “${updated.title}”: ${fields}`);
+      delete pendingCaseAudit.current[updated.id];
+    }, 1200);
+  };
 
   // Estados de modales y herramientas
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -158,6 +193,17 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
   // Estado de conexión continua y sincronización en tiempo real
   const [syncStatus, setSyncStatus] = useState<SyncStatusInfo>(() => getCurrentSyncStatus());
+
+  useEffect(() => {
+    if (profile?.role !== "firm") return;
+    let active = true;
+    void Promise.all([fetchAuditEvents(), isAuditLogReady()]).then(([events, ready]) => {
+      if (!active) return;
+      setAuditEvents(events);
+      setAuditCloudReady(ready);
+    });
+    return () => { active = false; };
+  }, [profile?.id, profile?.role]);
 
   // Tarea continua para mantener la base de datos siempre conectada y actualizada en cualquier momento
   useEffect(() => {
@@ -342,6 +388,8 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   };
 
   const handleUpdateCase = async (updated: CaseRecord) => {
+    const previous = allCases.find((item) => item.id === updated.id) || caseRecord;
+    scheduleCaseAudit(previous, updated);
     saveStoredCase(updated);
     await syncCaseToDatabase(updated);
     const updatedList = await fetchAllCasesFromDatabase(profile?.role === "firm" ? undefined : profile);
@@ -350,6 +398,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   };
 
   const handleSaveOrUpdateCase = async (savedCase: CaseRecord) => {
+    recordAudit(editingCase ? "UPDATE" : "CREATE", "case", savedCase.id, `${editingCase ? "Actualizó" : "Creó"} el expediente “${savedCase.title}” para ${savedCase.client_name || "cliente sin nombre"}.`);
     saveStoredCase(savedCase);
     await syncCaseToDatabase(savedCase);
     const updatedList = await fetchAllCasesFromDatabase(profile?.role === "firm" ? undefined : profile);
@@ -383,6 +432,8 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   };
 
   const handleDeleteCase = async (caseId: string) => {
+    const deletedCase = allCases.find((item) => item.id === caseId);
+    recordAudit("DELETE", "case", caseId, `Eliminó el expediente “${deletedCase?.title || caseId}”.`);
     await deleteCaseFromDatabase(caseId);
     const updatedList = await fetchAllCasesFromDatabase(profile?.role === "firm" ? undefined : profile);
     setAllCases(updatedList);
@@ -392,12 +443,14 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   const handleUpdateAgenda = (updated: AgendaItem[]) => {
     setAgenda(updated);
     saveStoredAgenda(updated);
+    recordAudit("UPDATE", "agenda", caseRecord?.id, `Actualizó la agenda del expediente “${caseRecord?.title || ""}”.`);
     if (caseRecord) syncListToSupabase("agenda_items", caseRecord.id, updated).catch((error) => console.error("No se pudo sincronizar el calendario:", error));
   };
 
   const handleUpdateHistory = (updated: HistoryItem[]) => {
     setHistory(updated);
     saveStoredHistory(updated);
+    recordAudit("UPDATE", "history", caseRecord?.id, `Actualizó actuaciones del expediente “${caseRecord?.title || ""}”.`);
     if (caseRecord) syncListToSupabase("history_items", caseRecord.id, updated).catch((error) => console.error("No se pudo sincronizar el historial:", error));
   };
 
@@ -494,6 +547,12 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   };
 
   const handleUpdateDocuments = (updated: DocumentItem[]) => {
+    const beforeIds = new Set(documents.map((item) => item.id));
+    const afterIds = new Set(updated.map((item) => item.id));
+    const addedDocs = updated.filter((item) => !beforeIds.has(item.id));
+    const removedDocs = documents.filter((item) => !afterIds.has(item.id));
+    addedDocs.forEach((doc) => recordAudit("CREATE", "document", doc.id, `Agregó el documento “${doc.name}” al expediente “${caseRecord?.title || ""}”.`));
+    removedDocs.forEach((doc) => recordAudit("DELETE", "document", doc.id, `Eliminó el documento “${doc.name}” del expediente “${caseRecord?.title || ""}”.`));
     setDocuments(updated);
     saveStoredDocuments(updated);
     if (caseRecord) {
@@ -514,6 +573,7 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
 
   // Finanzas del despacho
   const handleAddTransaction = (newRecord: FinancialRecord) => {
+    recordAudit("CREATE", newRecord.case_id ? "case_finance" : "accounting_movement", newRecord.id, `Registró ${newRecord.type === "ingreso" ? "ingreso" : "egreso"} por $${Number(newRecord.amount || 0).toLocaleString("es-CO")} COP: ${newRecord.concept}.`);
     const updated = [newRecord, ...finances];
     setFinances(updated);
     saveStoredFinances(updated);
@@ -527,12 +587,15 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
   };
 
   const handleDeleteTransaction = (id: string) => {
+    const removed = finances.find((item) => item.id === id);
+    if (removed) recordAudit("DELETE", removed.case_id ? "case_finance" : "accounting_movement", id, `Eliminó movimiento financiero “${removed.concept}” por $${Number(removed.amount || 0).toLocaleString("es-CO")} COP.`);
     const updated = finances.filter((f) => f.id !== id);
     setFinances(updated);
     saveStoredFinances(updated);
   };
 
   const handleUpdateTransaction = (updatedRecord: FinancialRecord) => {
+    recordAudit("UPDATE", updatedRecord.case_id ? "case_finance" : "accounting_movement", updatedRecord.id, `Actualizó movimiento financiero “${updatedRecord.concept}” por $${Number(updatedRecord.amount || 0).toLocaleString("es-CO")} COP.`);
     const updated = finances.map((f) => (f.id === updatedRecord.id ? updatedRecord : f));
     setFinances(updated);
     saveStoredFinances(updated);
@@ -1051,6 +1114,10 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
                 onRefreshUsers={refreshUsersList}
                 onRefreshCases={refreshCasesList}
                 currentUser={profile ? { email: profile.email, role: profile.role } : session?.user ? { email: session.user.email, role: isFirm ? "firm" : "client" } : { email, role: isFirm ? "firm" : "client" }}
+                auditEvents={auditEvents}
+                auditCloudReady={auditCloudReady}
+                backupData={{ cases: allCases, agenda, history, documents, finances }}
+                onAudit={recordAudit}
               />
             )}
 

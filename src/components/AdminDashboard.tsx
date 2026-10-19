@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
-import { CaseRecord } from "../types/portal";
+import type { AgendaItem, CaseRecord, DocumentItem, FinancialRecord, HistoryItem } from "../types/portal";
+import type { AuditAction, AuditEntry } from "../lib/auditLog";
 import {
-  StoredUser,
   SUPER_ADMIN_EMAIL,
   LOGIN_EMAIL_DOMAIN,
   normalizeLoginUsername,
@@ -19,6 +19,7 @@ import {
   saveStoredCase,
   SUPABASE_SQL_SETUP_SCRIPT,
 } from "../lib/supabaseClient";
+import type { StoredUser } from "../lib/supabaseClient";
 
 interface AdminDashboardProps {
   allCases: CaseRecord[];
@@ -30,8 +31,12 @@ interface AdminDashboardProps {
   onNavigateToSection: (section: "resumen" | "proceso" | "agenda" | "documentos" | "historial" | "economia") => void;
   onRefreshUsers?: () => void;
   onRefreshCases?: () => void;
-  initialTab?: "casos" | "clientes" | "conexion_supabase";
+  initialTab?: "casos" | "clientes" | "conexion_supabase" | "auditoria";
   currentUser?: { email?: string | null; role?: string } | null;
+  auditEvents?: AuditEntry[];
+  auditCloudReady?: boolean;
+  backupData?: { cases: CaseRecord[]; agenda: AgendaItem[]; history: HistoryItem[]; documents: DocumentItem[]; finances: FinancialRecord[] };
+  onAudit?: (action: AuditAction, entity: string, entityId: string | undefined, summary: string) => void;
 }
 
 export function AdminDashboard({
@@ -46,11 +51,15 @@ export function AdminDashboard({
   onRefreshCases,
   initialTab = "casos",
   currentUser,
+  auditEvents = [],
+  auditCloudReady = false,
+  backupData,
+  onAudit,
 }: AdminDashboardProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchField, setSearchField] = useState<"all" | "client_name" | "client_id">("all");
   const [selectedBranchFilter, setSelectedBranchFilter] = useState("all");
-  const [activeTab, setActiveTab] = useState<"casos" | "clientes" | "conexion_supabase">(initialTab);
+  const [activeTab, setActiveTab] = useState<"casos" | "clientes" | "conexion_supabase" | "auditoria">(initialTab);
   const [userSearchTerm, setUserSearchTerm] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState<"all" | "client" | "firm">("all");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
@@ -120,6 +129,24 @@ export function AdminDashboard({
     navigator.clipboard.writeText(SUPABASE_SQL_SETUP_SCRIPT);
     setCopiedSql(true);
     setTimeout(() => setCopiedSql(false), 2500);
+  };
+
+  const handleDownloadBackup = () => {
+    const payload = {
+      product: "J&A Legal",
+      exported_at: new Date().toISOString(),
+      format_version: 1,
+      data: {
+        ...(backupData || { cases: allCases }),
+        users: registeredUsers.map(({ password: _password, ...user }) => user),
+      },
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `ja-legal-respaldo-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   // Probar y guardar conexión a Supabase
@@ -257,6 +284,7 @@ export function AdminDashboard({
       );
 
       if (res.success) {
+        onAudit?.("CREATE", "user", res.user?.id, `Creó la cuenta “${newFullName.trim()}” con usuario ${username} y rol ${newRole}.`);
         setUserCreationFeedback({
           type: "success",
           text: `Cuenta ${newFullName} creada. Usuario para iniciar sesión: ${username}.`,
@@ -292,6 +320,7 @@ export function AdminDashboard({
 
     try {
       await deleteUserAccount(userId, userEmail);
+      onAudit?.("DELETE", "user", userId, `Eliminó la cuenta ${userLabel} (${userEmail}).`);
       if (onRefreshUsers) onRefreshUsers();
     } catch (e: any) {
       alert(e.message || "Error eliminando usuario.");
@@ -349,8 +378,10 @@ export function AdminDashboard({
         id_number: editProfile.id_number.trim(),
         phone: editProfile.phone.trim(),
       });
+      onAudit?.("UPDATE", "user", editingUser.id, `Actualizó el perfil de ${editProfile.full_name.trim()} (${username}).`);
       if (editNewPassword && !editPasswordUpdated) {
         await resetManagedUserPassword(editingUser.id, editingUser.email, editNewPassword);
+        onAudit?.("PASSWORD_RESET", "user", editingUser.id, `Restableció la contraseña de ${editProfile.full_name.trim()}.`);
         setEditPasswordUpdated(true);
         setCopiedNewCredentials(false);
         if (onRefreshUsers) onRefreshUsers();
@@ -608,6 +639,23 @@ export function AdminDashboard({
           <span style={{ fontSize: "0.65rem", padding: "1px 6px", borderRadius: "8px", background: isSupabaseLive ? "#22c55e" : "#eab308", color: "#000", fontWeight: 800 }}>
             {isSupabaseLive ? "CONECTADO" : "LOCAL"}
           </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("auditoria")}
+          style={{
+            background: activeTab === "auditoria" ? "var(--brass)" : "transparent",
+            color: activeTab === "auditoria" ? "var(--ink)" : "var(--text)",
+            border: activeTab === "auditoria" ? "none" : "1px solid var(--line)",
+            fontWeight: 700,
+            fontSize: "0.82rem",
+            padding: "8px 18px",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          🛡️ Seguridad & Bitácora
         </button>
       </div>
 
@@ -1594,6 +1642,32 @@ export function AdminDashboard({
       {/* ======================================================== */}
       {/* PESTAÑA 3: CONEXIÓN SUPABASE & SQL (NUBE POSTGRESQL)      */}
       {/* ======================================================== */}
+      {activeTab === "auditoria" && (
+        <section style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+          <div style={{ background: "linear-gradient(135deg, rgba(217,181,106,.14), rgba(15,39,68,.6))", border: "1px solid var(--brass)", borderRadius: "8px", padding: "22px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
+            <div>
+              <span style={{ color: "var(--brass-light)", fontSize: ".72rem", fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase" }}>Control y trazabilidad</span>
+              <h3 style={{ margin: "6px 0", color: "var(--text-bright)", fontFamily: "var(--font-heading)" }}>Seguridad, actividad y copias</h3>
+              <p style={{ margin: 0, color: "var(--text)", fontSize: ".86rem" }}>Consulta cambios recientes del despacho y descarga una copia de los datos operativos.</p>
+            </div>
+            <button type="button" onClick={handleDownloadBackup} style={{ background: "var(--brass)", color: "var(--ink)", border: 0, borderRadius: "5px", padding: "11px 16px", fontWeight: 800, cursor: "pointer" }}>⬇ Descargar respaldo</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: "12px" }}>
+            <div style={{ background: "var(--ink-soft)", border: "1px solid var(--line)", borderRadius: "7px", padding: "15px" }}><small style={{ color: "var(--text-muted)" }}>Eventos recientes</small><strong style={{ display: "block", color: "var(--brass)", fontSize: "1.45rem", marginTop: "5px" }}>{auditEvents.length}</strong></div>
+            <div style={{ background: "var(--ink-soft)", border: "1px solid var(--line)", borderRadius: "7px", padding: "15px" }}><small style={{ color: "var(--text-muted)" }}>Bitácora en Supabase</small><strong style={{ display: "block", color: auditCloudReady ? "#4ade80" : "#facc15", fontSize: "1rem", marginTop: "9px" }}>{auditCloudReady ? "Conectada" : "Requiere migración"}</strong></div>
+            <div style={{ background: "var(--ink-soft)", border: "1px solid var(--line)", borderRadius: "7px", padding: "15px" }}><small style={{ color: "var(--text-muted)" }}>Datos incluidos en el respaldo</small><strong style={{ display: "block", color: "var(--text-bright)", fontSize: ".9rem", marginTop: "9px" }}>Casos, agenda, documentos, finanzas y perfiles</strong></div>
+          </div>
+
+          {!auditCloudReady && <div role="status" style={{ background: "rgba(250,204,21,.08)", border: "1px solid rgba(250,204,21,.35)", borderRadius: "6px", padding: "14px 16px", color: "var(--text)", lineHeight: 1.55 }}><strong style={{ color: "#facc15" }}>Activa el registro persistente:</strong> en Supabase abre <strong>SQL Editor</strong>, ejecuta el archivo <code>supabase/firm-accountability-security.sql</code> del proyecto y vuelve a cargar este panel. La bitácora local seguirá disponible mientras tanto.</div>}
+
+          <div style={{ background: "var(--ink-soft)", border: "1px solid var(--line)", borderRadius: "8px", overflow: "hidden" }}>
+            <div style={{ padding: "15px 18px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}><strong style={{ color: "var(--text-bright)" }}>Actividad del despacho</strong><span style={{ color: "var(--text-muted)", fontSize: ".78rem" }}>Cambios de casos, perfiles, documentos y movimientos</span></div>
+            {auditEvents.length === 0 ? <div style={{ padding: "32px 18px", textAlign: "center", color: "var(--text-muted)" }}>Todavía no hay acciones registradas. Los próximos cambios aparecerán aquí.</div> : <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: "720px" }}><thead><tr>{["Fecha", "Usuario", "Acción", "Elemento", "Detalle"].map((label) => <th key={label} style={{ padding: "11px 14px", textAlign: "left", color: "var(--text-muted)", fontSize: ".72rem", textTransform: "uppercase", borderBottom: "1px solid var(--line)" }}>{label}</th>)}</tr></thead><tbody>{auditEvents.map((entry) => <tr key={entry.id}><td style={{ padding: "12px 14px", color: "var(--text-muted)", whiteSpace: "nowrap", borderBottom: "1px solid var(--line)" }}>{new Date(entry.created_at).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}</td><td style={{ padding: "12px 14px", color: "var(--text-bright)", borderBottom: "1px solid var(--line)" }}>{entry.actor_name || entry.actor_email}</td><td style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)" }}><span style={{ color: entry.action === "DELETE" ? "#fb7185" : entry.action === "CREATE" ? "#4ade80" : "#38bdf8", fontWeight: 800, fontSize: ".74rem" }}>{entry.action}</span></td><td style={{ padding: "12px 14px", color: "var(--text)", borderBottom: "1px solid var(--line)" }}>{entry.entity}</td><td style={{ padding: "12px 14px", color: "var(--text)", borderBottom: "1px solid var(--line)" }}>{entry.summary}</td></tr>)}</tbody></table></div>}
+          </div>
+        </section>
+      )}
+
       {activeTab === "conexion_supabase" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
           {/* Tarjeta de Configuración de API Keys */}
