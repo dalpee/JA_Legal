@@ -924,17 +924,20 @@ export function ClientPortal({ onBackToSite }: ClientPortalProps) {
               </button>
 
               {/* Pestaña: Liquidador Judicial (LegalTech) */}
-              <button
-                type="button"
-                className={activeSection === "calculadora" ? "active" : ""}
-                onClick={() => setActiveSection("calculadora")}
-                style={{
-                  borderLeft: activeSection === "calculadora" ? "3px solid var(--brass)" : "none",
-                }}
-              >
-                <span>Liquidador Judicial</span>
-                <small style={{ color: "var(--brass-light)" }}>LegalTech</small>
-              </button>
+                            {/* Pestaña: Liquidador Judicial (LegalTech) - solo abogados */}
+              {isFirm && (
+                <button
+                  type="button"
+                  className={activeSection === "calculadora" ? "active" : ""}
+                  onClick={() => setActiveSection("calculadora")}
+                  style={{
+                    borderLeft: activeSection === "calculadora" ? "3px solid var(--brass)" : "none",
+                  }}
+                >
+                  <span>Liquidador Judicial</span>
+                  <small style={{ color: "var(--brass-light)" }}>LegalTech</small>
+                </button>
+              )}
             </nav>
 
             {/* Panel de control rápido para abogados */}
